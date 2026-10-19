@@ -106,7 +106,7 @@ dialog menu{display:flex;gap:8px;justify-content:flex-end;padding:0;margin:12px 
   <input id="token" type="password" placeholder="GitHub token (optional)" autocomplete="off">
   <menu><button class="ghost" id="clear-cache" value="clear">Clear saved towns</button><button class="ghost" value="cancel">Close</button><button class="btn" id="save-token" value="save">Save token</button></menu>
 </form></dialog>
-<script>window.GH_SITE_REPO = "Beachkila/GitHoods";</script>
+<script>window.GH_SITE_REPO = "Beachkila/GitHoods"; window.GH_WORKER_URL = "https://githoods-relay.kbmallonee.workers.dev";</script>
 <script>
 /* ---- scanner.js ---- */
 /* GitHoods scanner: reads a public repo through GitHub's REST API and raw file host.
@@ -1897,6 +1897,18 @@ class WorldView {
     return `https://github.com/${r}/issues/new?title=${encodeURIComponent('scan: ' + target)}&body=${encodeURIComponent('Requested from the GitHoods page. The bot builds the town and replies here.')}`;
   }
 
+  // Every search goes to the public map through the relay; the bot rebuilds it from GitHub.
+  const RELAY = window.GH_WORKER_URL || '';
+  async function sendToMap(target, t) {
+    if (!RELAY) return false;
+    if (t && t.public && t.builtAt && Date.now() - t.builtAt < 7 * 864e5) return false; // already fresh on the map
+    try {
+      const r = await fetch(RELAY.replace(/\/$/, '') + '/request', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ target }) });
+      if (r.ok && t) { t.queued = Date.now(); if (state.current === t) renderSummary(t); }
+      return r.ok;
+    } catch (e) { return false; }
+  }
+
   /* ---------- scanning ---------- */
   function parseQ(q) {
     q = q.trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/, '').replace(/[?#].*$/, '').replace(/\/+$/, '');
@@ -1912,7 +1924,7 @@ class WorldView {
         const o = await scanOwner(p.owner, (m) => progress(m));
         state.owners[o.login] = o; p.owner = o.login;
       }
-      if (!p.repo) { save(); renderShelf(); progress(`Charted ${p.owner}: ${state.owners[p.owner].repos.length} plots.`, 'ok'); setTab('world'); worldView.go({ kind: 'nation', login: p.owner }); return; }
+      if (!p.repo) { sendToMap(p.owner); save(); renderShelf(); progress(`Charted ${p.owner}: ${state.owners[p.owner].repos.length} plots.`, 'ok'); setTab('world'); worldView.go({ kind: 'nation', login: p.owner }); return; }
       const scan = await scanRepo(p.owner, p.repo, (m) => progress(m));
       progress('Laying out streets…');
       await new Promise((r) => setTimeout(r, 0));
@@ -1921,7 +1933,7 @@ class WorldView {
       putTown(t);
       const o = state.owners[scan.owner] || Object.values(state.owners).find((x) => x.login.toLowerCase() === scan.owner.toLowerCase());
       if (o && !o.repos.some((r) => r.name.toLowerCase() === scan.repo.toLowerCase())) o.repos.push({ name: scan.repo, id: scan.id, created: scan.meta.created, size: scan.meta.size, lang: null, stars: scan.meta.stars });
-      save(); renderShelf(); showTown(t);
+      save(); renderShelf(); showTown(t); sendToMap(t.key, t);
       progress(`Built ${t.key}: ${t.archetype.name}.`, 'ok');
     } catch (e) {
       progress(e && e.message ? e.message : String(e), 'err'); console.error(e);
@@ -1948,6 +1960,7 @@ class WorldView {
       ${langBar(s.languages)}`;
     const req = requestUrl(t.key);
     html += t.public ? `<p class="pub">On the public map${t.builtAt ? ` · built ${new Date(t.builtAt).toISOString().slice(0, 10)}` : ''}</p>`
+      : t.queued ? `<p class="pub">Sent to the public map. It shows up for everyone in a few minutes.</p>`
       : req ? `<p class="pub local">Only in your browser. <a class="btn small" href="${esc(req)}" target="_blank" rel="noopener">Add to public map</a></p><p class="muted small">Opens a GitHub issue. The map bot rebuilds the town from GitHub and adds it for everyone.</p>` : `<p class="pub local">Only in your browser.</p>`;
     if (t.mode === 'code') {
       html += `<h3>Streets <small>named for the district they lead to, width = import traffic</small></h3><ul class="list">${t.streets.slice(0, 10).map((st) => `<li><span>${esc(st.name)}</span><b>${st.traffic}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
