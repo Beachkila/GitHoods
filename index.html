@@ -1,0 +1,2054 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>GitHoods</title>
+<meta name="description" content="Turns a GitHub repository into a town map. Folders become districts, files become buildings, imports become streets.">
+<style>
+:root{--bg:#F3EAD7;--panel:#FBF6EC;--ink:#3B2A1A;--soft:#7A6650;--line:#D9C9AB;--accent:#C8643B;--accent2:#5E9E8A;--input:#FFFDF8;--err:#A63D2A;color-scheme:light}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1F1A15;--panel:#29221B;--ink:#EFE4D0;--soft:#B5A58C;--line:#43382C;--input:#211B15;--err:#F08A72;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#1F1A15;--panel:#29221B;--ink:#EFE4D0;--soft:#B5A58C;--line:#43382C;--input:#211B15;--err:#F08A72;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column}
+header{display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+.brand{font-weight:700;font-size:18px;letter-spacing:.2px;margin-right:4px}
+.brand span{color:var(--accent)}
+#form{display:flex;gap:6px;flex:1 1 260px;min-width:0}
+#q{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--input);color:var(--ink);font:inherit}
+button{font:inherit;color:inherit;cursor:pointer}
+.btn{padding:8px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:#fff;font-weight:600}
+.btn:disabled{opacity:.6;cursor:wait}
+.ghost{padding:7px 10px;border-radius:8px;border:1px solid var(--line);background:transparent}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:transparent;padding:6px 12px}
+.seg button[aria-selected="true"],.seg button[aria-pressed="true"]{background:var(--ink);color:var(--bg)}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:8px 16px;border-bottom:1px solid var(--line)}
+#progress{font-size:13px;color:var(--soft);min-height:1em;flex:1 1 200px}
+#progress.err{color:var(--err)} #progress.ok{color:var(--accent2)}
+#progress.busy::before{content:"";display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--accent);margin-right:6px;animation:p 1s infinite}
+@keyframes p{50%{opacity:.2}}
+#crumbs{display:none;gap:6px;align-items:center}
+#crumbs button{border:0;background:none;color:var(--accent);padding:0;text-decoration:underline}
+#crumbs i{color:var(--soft);font-style:normal}
+body[data-tab="world"] #crumbs{display:flex} body[data-tab="world"] #modes{display:none}
+main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:0}
+.stage{position:relative;min-height:0}
+canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block}
+#world-canvas{display:none} body[data-tab="world"] #world-canvas{display:block} body[data-tab="world"] #town-canvas{display:none}
+.zoom{position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:4px}
+.zoom button{width:34px;height:34px;border-radius:8px;border:1px solid #CDBB98;background:#FBF6EC;color:#3B2A1A;font-size:16px}
+aside{border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:14px 16px 24px}
+aside h2{font-size:17px;margin:0 0 4px;word-break:break-word} aside h2 a{color:inherit}
+aside h3{font-size:13px;margin:16px 0 6px;text-transform:uppercase;letter-spacing:.4px;color:var(--soft)}
+aside h3 small{text-transform:none;letter-spacing:0;font-weight:400;display:block}
+aside h4{margin:0 0 4px;font-size:15px;word-break:break-word}
+.arch{margin:0 0 6px} .desc{margin:0 0 8px;color:var(--soft)}
+.muted{color:var(--soft)} .note{font-size:12px;color:var(--soft);border-left:3px solid var(--line);padding-left:8px}
+.path{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--soft);word-break:break-all;margin:0 0 4px}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin:8px 0}
+.stats.small{grid-template-columns:repeat(2,1fr)}
+.stats div{background:var(--bg);border-radius:6px;padding:5px 8px} .stats dt{font-size:11px;color:var(--soft)} .stats dd{margin:0;font-weight:600}
+.langbar{display:flex;height:10px;border-radius:5px;overflow:hidden;border:1px solid var(--line);margin-top:10px}
+.langkey{display:flex;flex-wrap:wrap;gap:4px 10px;font-size:12px;margin-top:4px;color:var(--soft)}
+.langkey i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;border:1px solid #0002}
+.list{list-style:none;margin:0;padding:0}
+.list li{display:flex;justify-content:space-between;gap:8px;padding:4px 0;border-bottom:1px dashed var(--line)}
+.list li b{white-space:nowrap;flex:none}
+.list li span,.list li button{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.list em{font-style:normal;font-size:11px;color:var(--accent);margin-left:4px}
+.link{border:0;background:none;padding:0;color:var(--accent);text-align:left}
+#inspector{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:12px;background:var(--bg);min-height:62px}
+#inspector p{margin:2px 0}
+aside a{color:var(--accent)} aside a.btn{color:#fff}
+.shelf-wrap{padding:6px 16px 10px;border-top:1px solid var(--line);background:var(--panel);display:flex;gap:8px;align-items:center;overflow-x:auto}
+.shelf-wrap b{font-size:12px;color:var(--soft);white-space:nowrap}
+#shelf{display:flex;gap:6px}
+#shelf button.mine{border-style:dashed}
+.pub{margin:10px 0 0;font-size:13px;color:var(--accent2);font-weight:600}.pub.local{color:var(--soft);font-weight:400;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.btn.small{padding:5px 10px;font-size:13px;text-decoration:none;display:inline-block}
+.small{font-size:12px}
+#shelf button{white-space:nowrap;border:1px solid var(--line);background:var(--input);border-radius:999px;padding:3px 10px;font-size:12px}
+dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);max-width:min(460px,92vw)}
+dialog input{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--input);color:var(--ink);font:inherit}
+dialog menu{display:flex;gap:8px;justify-content:flex-end;padding:0;margin:12px 0 0;flex-wrap:wrap}
+@media (max-width:820px){
+  main{grid-template-columns:1fr;grid-template-rows:62vh auto}
+  aside{border-left:0;border-top:1px solid var(--line);overflow:visible}
+  body{height:auto;min-height:100%} html{height:auto}
+}
+</style>
+</head>
+<body data-tab="town">
+<header>
+  <div class="brand">Git<span>Hoods</span></div>
+  <form id="form" autocomplete="off"><input id="q" placeholder="owner/repo, a GitHub link, or an owner" aria-label="Repository or owner" spellcheck="false" autocapitalize="off"><button class="btn" id="scan" type="submit">Scan</button><button class="ghost" id="gear" type="button" title="Settings" aria-label="Settings">⚙</button></form>
+</header>
+<div class="bar">
+  <div class="seg" role="tablist"><button id="tab-town" role="tab" aria-selected="true">Town</button><button id="tab-world" role="tab" aria-selected="false">World</button></div>
+  <div class="seg" id="modes"><button id="mode-plan" aria-pressed="true">Street map</button><button id="mode-iso" aria-pressed="false">Isometric</button></div>
+  <nav id="crumbs"></nav>
+  <div id="progress"></div>
+</div>
+<main>
+  <div class="stage">
+    <canvas id="town-canvas"></canvas>
+    <canvas id="world-canvas"></canvas>
+    <div class="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zfit" aria-label="Fit" title="Fit">⤢</button></div>
+  </div>
+  <aside><div id="inspector"></div><div id="summary"></div></aside>
+</main>
+<div class="shelf-wrap"><b>On the map · <span id="shelf-count"></span></b><div id="shelf"></div></div>
+<dialog id="settings"><form method="dialog">
+  <h3 style="margin-top:0">Settings</h3>
+  <p class="muted">Without a token GitHub allows 60 requests an hour from your address. A small repo costs about 8 requests plus raw file reads, which are not counted. A fine-grained token with public read-only access raises the limit to 5,000. It is stored only in this browser.</p>
+  <input id="token" type="password" placeholder="GitHub token (optional)" autocomplete="off">
+  <menu><button class="ghost" id="clear-cache" value="clear">Clear saved towns</button><button class="ghost" value="cancel">Close</button><button class="btn" id="save-token" value="save">Save token</button></menu>
+</form></dialog>
+<script>window.GH_SITE_REPO = "Beachkila/GitHoods";</script>
+<script>
+/* ---- scanner.js ---- */
+/* GitHoods scanner: reads a public repo through GitHub's REST API and raw file host.
+   Deterministic: same repo state -> same scan object. No AI. */
+
+const GH = (() => {
+  const q = new URLSearchParams(location.search);
+  return {
+    api: q.get('api') || 'https://api.github.com',
+    raw: q.get('raw') || 'https://raw.githubusercontent.com',
+  };
+})();
+
+const CODE_EXT = {
+  py: 'python', pyw: 'python',
+  js: 'javascript', mjs: 'javascript', cjs: 'javascript', jsx: 'javascript',
+  ts: 'typescript', tsx: 'typescript', mts: 'typescript', cts: 'typescript',
+  vue: 'javascript', svelte: 'javascript',
+  html: 'html', htm: 'html',
+  css: 'css', scss: 'css', sass: 'css', less: 'css',
+  go: 'go', rs: 'rust',
+  java: 'java', kt: 'kotlin', kts: 'kotlin', scala: 'scala',
+  c: 'c', h: 'c', cc: 'cpp', cpp: 'cpp', cxx: 'cpp', hpp: 'cpp', hh: 'cpp', ino: 'cpp',
+  cs: 'csharp', fs: 'fsharp', swift: 'swift', m: 'objc', mm: 'objc',
+  rb: 'ruby', php: 'php', r: 'r', R: 'r', lua: 'lua', dart: 'dart',
+  sh: 'shell', bash: 'shell', zsh: 'shell', ps1: 'shell', bat: 'shell',
+  ex: 'elixir', exs: 'elixir', erl: 'erlang', hs: 'haskell', ml: 'ocaml', clj: 'clojure',
+  jl: 'julia', nim: 'nim', zig: 'zig', sql: 'sql',
+};
+const MANIFESTS = ['package.json', 'requirements.txt', 'requirements-dev.txt', 'pyproject.toml', 'Cargo.toml', 'go.mod', 'Gemfile', 'composer.json', 'setup.py'];
+
+function extOf(p) {
+  const b = p.split('/').pop();
+  const i = b.lastIndexOf('.');
+  return i > 0 ? b.slice(i + 1) : '';
+}
+
+function ghToken() { try { return localStorage.getItem('gh_token') || ''; } catch (e) { return ''; } }
+
+class ScanError extends Error { constructor(msg, code) { super(msg); this.code = code; } }
+
+async function ghFetch(path) {
+  const headers = { Accept: 'application/vnd.github+json' };
+  const tok = ghToken(); if (tok) headers.Authorization = 'Bearer ' + tok;
+  let res;
+  try { res = await fetch(GH.api + path, { headers }); }
+  catch (e) { throw new ScanError("Couldn't reach GitHub. Check your connection.", 'network'); }
+  if (res.status === 404) throw new ScanError("That repo or owner wasn't found, or it's private.", 'not_found');
+  if (res.status === 403 || res.status === 429) {
+    const reset = res.headers.get('x-ratelimit-reset');
+    const mins = reset ? Math.max(1, Math.ceil((reset * 1000 - Date.now()) / 60000)) : null;
+    throw new ScanError('GitHub rate limit reached' + (mins ? `. Try again in about ${mins} min` : '') + ', or add a token in settings.', 'rate');
+  }
+  if (res.status === 409) return { json: [], headers: res.headers }; // empty repo
+  if (!res.ok) throw new ScanError('GitHub returned an error (' + res.status + ').', 'http');
+  return { json: await res.json(), headers: res.headers };
+}
+
+function lastPageCount(headers, fallback) {
+  const link = headers.get('link') || headers.get('Link');
+  if (!link) return fallback;
+  const m = link.match(/[?&]page=(\d+)[^>]*>;\s*rel="last"/);
+  return m ? parseInt(m[1], 10) : fallback;
+}
+
+async function countOf(path) {
+  try {
+    const { json, headers } = await ghFetch(path + (path.includes('?') ? '&' : '?') + 'per_page=1');
+    return lastPageCount(headers, Array.isArray(json) ? json.length : 0);
+  } catch (e) { if (e.code === 'rate') throw e; return null; }
+}
+
+async function fetchRaw(owner, repo, branch, path) {
+  const url = `${GH.raw}/${owner}/${repo}/${encodeURIComponent(branch)}/${path.split('/').map(encodeURIComponent).join('/')}`;
+  try {
+    const r = await fetch(url);
+    if (!r.ok) return null;
+    return await r.text();
+  } catch (e) { return null; }
+}
+
+async function pool(items, n, fn) {
+  let i = 0;
+  const workers = Array.from({ length: Math.min(n, items.length) }, async () => {
+    while (i < items.length) { const k = i++; await fn(items[k], k); }
+  });
+  await Promise.all(workers);
+}
+
+/* ---------- import parsing ---------- */
+function parseImports(lang, path, text) {
+  const out = [];
+  const add = (s) => { if (s && out.length < 400) out.push(s.trim()); };
+  let m;
+  if (lang === 'python') {
+    const re1 = /^[ \t]*import[ \t]+([\w.]+(?:[ \t]*,[ \t]*[\w.]+)*)/gm;
+    while ((m = re1.exec(text))) m[1].split(',').forEach((s) => add(s.trim().split(/\s+as\s+/)[0]));
+    const re2 = /^[ \t]*from[ \t]+(\.*[\w.]*)[ \t]+import[ \t]+(\([^)]*\)|[^\n]*)/gm;
+    while ((m = re2.exec(text))) {
+      const mod = m[1];
+      add(mod);
+      if (mod.startsWith('.')) m[2].replace(/#[^\n]*/g, '').replace(/[()\\]/g, ' ').split(',').map((s) => s.trim().split(/\s+as\s+/)[0].trim()).filter((s) => /^\w+$/.test(s)).slice(0, 20)
+        .forEach((nm) => add((mod.endsWith('.') ? mod : mod + '.') + nm));
+    }
+  } else if (lang === 'javascript' || lang === 'typescript') {
+    const re = /^[ \t]*(?:import|export)\s[^'"`;]*?from\s*['"]([^'"\n]+)['"]|^[ \t]*import\s*['"]([^'"\n]+)['"]|(?<![\w$.])require\(\s*['"]([^'"\n]+)['"]\s*\)|(?<![\w$.])import\(\s*['"]([^'"\n]+)['"]\s*\)/gm;
+    while ((m = re.exec(text))) { const v = m[1] || m[2] || m[3] || m[4]; if (!/[\s,$`]/.test(v)) add(v); }
+  } else if (lang === 'html') {
+    const re = /<script[^>]+src=["']([^"']+)["']|<link[^>]+href=["']([^"']+\.css[^"']*)["']/gi;
+    while ((m = re.exec(text))) add(m[1] || m[2]);
+    const re2 = /<script[^>]*>([\s\S]*?)<\/script>/gi; // inline module imports
+    while ((m = re2.exec(text))) {
+      const r3 = /import\s[^'"`;]*?from\s*['"]([^'"]+)['"]/g; let k;
+      while ((k = r3.exec(m[1]))) add(k[1]);
+    }
+  } else if (lang === 'go') {
+    const block = /import\s*\(([\s\S]*?)\)/g;
+    while ((m = block.exec(text))) { const r = /"([^"]+)"/g; let k; while ((k = r.exec(m[1]))) add(k[1]); }
+    const single = /import\s+(?:\w+\s+)?"([^"]+)"/g;
+    while ((m = single.exec(text))) add(m[1]);
+  } else if (lang === 'rust') {
+    const re = /^\s*(?:pub\s+)?use\s+([\w:]+)/gm;
+    while ((m = re.exec(text))) add(m[1]);
+    const re2 = /^\s*(?:pub\s+)?mod\s+(\w+)\s*;/gm;
+    while ((m = re2.exec(text))) add('mod::' + m[1]);
+    const re3 = /^\s*extern\s+crate\s+(\w+)/gm;
+    while ((m = re3.exec(text))) add(m[1]);
+  } else if (lang === 'java' || lang === 'kotlin' || lang === 'scala') {
+    const re = /^\s*import\s+(?:static\s+)?([\w.]+)/gm;
+    while ((m = re.exec(text))) add(m[1]);
+  } else if (lang === 'c' || lang === 'cpp' || lang === 'objc') {
+    const re = /^\s*#\s*(?:include|import)\s*([<"])([^>"]+)[>"]/gm;
+    while ((m = re.exec(text))) add((m[1] === '"' ? '"' : '<') + m[2]);
+  } else if (lang === 'ruby') {
+    const re = /^\s*require(_relative)?\s*\(?\s*['"]([^'"]+)['"]/gm;
+    while ((m = re.exec(text))) add((m[1] ? './' : '') + m[2]);
+  } else if (lang === 'php') {
+    const re = /^\s*use\s+([\w\\]+)/gm;
+    while ((m = re.exec(text))) add(m[1]);
+    const re2 = /(?:require|include)(?:_once)?\s*\(?\s*['"]([^'"]+)['"]/g;
+    while ((m = re2.exec(text))) add('./' + m[1]);
+  } else if (lang === 'swift') {
+    const re = /^\s*import\s+(\w+)/gm;
+    while ((m = re.exec(text))) add(m[1]);
+  } else if (lang === 'csharp' || lang === 'fsharp') {
+    const re = /^\s*(?:using|open)\s+([\w.]+)\s*;?/gm;
+    while ((m = re.exec(text))) add(m[1]);
+  } else if (lang === 'r') {
+    const re = /(?:library|require)\(\s*['"]?([\w.]+)['"]?\s*\)|source\(\s*['"]([^'"]+)['"]/g;
+    while ((m = re.exec(text))) add(m[1] || ('./' + m[2]));
+  } else if (lang === 'lua') {
+    const re = /require\s*\(?\s*['"]([^'"]+)['"]/g;
+    while ((m = re.exec(text))) add(m[1]);
+  } else if (lang === 'dart') {
+    const re = /^\s*import\s+['"]([^'"]+)['"]/gm;
+    while ((m = re.exec(text))) add(m[1]);
+  } else if (lang === 'css') {
+    const re = /@import\s+(?:url\()?['"]?([^'")\s;]+)/g;
+    while ((m = re.exec(text))) add(m[1]);
+  }
+  return out;
+}
+
+const ROUTE_RE = /@(?:app|router|bp|api)\.(?:get|post|put|delete|patch|route)\(|\b(?:app|router)\.(?:get|post|put|delete|patch)\(\s*['"`]|HandleFunc\(|\.path\s*==\s*['"]|@(?:Get|Post|Put|Delete)Mapping/g;
+
+function fileMetrics(text) {
+  const lines = text.length ? text.split('\n').length : 0;
+  const count = (re) => (text.match(re) || []).length;
+  return {
+    lines,
+    routes: count(ROUTE_RE),
+    canvas: /getContext\(|<canvas|\bcanvas\b/.test(text) ? 1 : 0,
+    gpio: count(/\bgpio\b|GPIO|gpiozero|RPi\b/g) > 2 ? 1 : 0,
+    storage: /localStorage|sessionStorage|indexedDB/.test(text) ? 1 : 0,
+    fetchLocal: count(/\bfetch\(\s*['"`]\/(?!\/)|\baxios\.\w+\(\s*['"`]\/(?!\/)|XMLHttpRequest/g),
+    classes: count(/^\s*(?:export\s+)?(?:abstract\s+)?(?:class|struct|interface)\s+\w/gm),
+    fns: count(/\bfunction\b|\bdef\s+\w|\bfn\s+\w|\bfunc\s+\w|=>\s*[{(]/g),
+  };
+}
+
+/* ---------- manifests ---------- */
+function parseManifest(name, text) {
+  const deps = {}; // name -> 'run' | 'dev'
+  const put = (n, k) => { n = (n || '').trim(); if (n && !deps[n]) deps[n] = k; };
+  try {
+    if (name === 'package.json') {
+      const j = JSON.parse(text);
+      Object.keys(j.dependencies || {}).forEach((n) => put(n, 'run'));
+      Object.keys(j.peerDependencies || {}).forEach((n) => put(n, 'run'));
+      Object.keys(j.devDependencies || {}).forEach((n) => put(n, 'dev'));
+      return { deps, pkgName: j.name || null, workspaces: j.workspaces || null };
+    }
+    if (name.startsWith('requirements')) {
+      text.split('\n').forEach((l) => { const m = l.trim().match(/^([A-Za-z0-9_.\-]+)/); if (m && !l.trim().startsWith('#') && !l.trim().startsWith('-')) put(m[1], name.includes('dev') ? 'dev' : 'run'); });
+    } else if (name === 'pyproject.toml') {
+      const arr = text.match(/dependencies\s*=\s*\[([\s\S]*?)\]/);
+      if (arr) (arr[1].match(/["']([A-Za-z0-9_.\-]+)/g) || []).forEach((s) => put(s.slice(1), 'run'));
+      const poetry = text.match(/\[tool\.poetry\.dependencies\]([\s\S]*?)(\n\[|$)/);
+      if (poetry) poetry[1].split('\n').forEach((l) => { const m = l.match(/^([A-Za-z0-9_.\-]+)\s*=/); if (m && m[1] !== 'python') put(m[1], 'run'); });
+    } else if (name === 'Cargo.toml') {
+      const sec = /\[(dev-|build-)?dependencies\]([\s\S]*?)(?=\n\[|$)/g; let m;
+      while ((m = sec.exec(text))) m[2].split('\n').forEach((l) => { const k = l.match(/^([A-Za-z0-9_\-]+)\s*=/); if (k) put(k[1], m[1] ? 'dev' : 'run'); });
+      const pn = text.match(/\[package\][\s\S]*?name\s*=\s*"([^"]+)"/);
+      return { deps, pkgName: pn ? pn[1] : null };
+    } else if (name === 'go.mod') {
+      const mod = text.match(/^module\s+(\S+)/m);
+      const req = text.match(/require\s*\(([\s\S]*?)\)/);
+      (req ? req[1].split('\n') : []).forEach((l) => { const k = l.trim().split(/\s+/)[0]; if (k && !k.startsWith('//')) put(k, l.includes('// indirect') ? 'dev' : 'run'); });
+      (text.match(/^require\s+(\S+)\s+\S+/gm) || []).forEach((l) => put(l.split(/\s+/)[1], 'run'));
+      return { deps, goModule: mod ? mod[1] : null };
+    } else if (name === 'Gemfile') {
+      (text.match(/^\s*gem\s+['"]([^'"]+)/gm) || []).forEach((l) => put(l.match(/['"]([^'"]+)/)[1], 'run'));
+    } else if (name === 'composer.json') {
+      const j = JSON.parse(text);
+      Object.keys(j.require || {}).forEach((n) => put(n, 'run'));
+      Object.keys(j['require-dev'] || {}).forEach((n) => put(n, 'dev'));
+    } else if (name === 'setup.py') {
+      const arr = text.match(/install_requires\s*=\s*\[([\s\S]*?)\]/);
+      if (arr) (arr[1].match(/["']([A-Za-z0-9_.\-]+)/g) || []).forEach((s) => put(s.slice(1), 'run'));
+    }
+  } catch (e) { /* malformed manifest: ignore */ }
+  return { deps };
+}
+
+/* ---------- owner light scan ---------- */
+async function scanOwner(owner, onProgress = () => {}) {
+  onProgress('Reading owner ' + owner);
+  const { json: u } = await ghFetch(`/users/${owner}`);
+  const repos = [];
+  const pages = Math.min(5, Math.ceil((u.public_repos || 0) / 100) || 1);
+  for (let p = 1; p <= pages; p++) {
+    const { json } = await ghFetch(`/users/${owner}/repos?per_page=100&sort=created&direction=asc&page=${p}`);
+    if (!Array.isArray(json) || !json.length) break;
+    json.forEach((r) => repos.push({
+      name: r.name, id: r.id, created: r.created_at, size: r.size, lang: r.language,
+      stars: r.stargazers_count, fork: !!r.fork, archived: !!r.archived,
+    }));
+  }
+  repos.sort((a, b) => a.id - b.id);
+  return { login: u.login, id: u.id, type: u.type, created: u.created_at, publicRepos: u.public_repos, repos, scannedAt: Date.now() };
+}
+
+/* ---------- full repo scan ---------- */
+const FILE_CAP = 700, BYTE_CAP = 9e6, TREE_DETAIL_CAP = 6000;
+
+async function scanRepo(owner, repo, onProgress = () => {}) {
+  onProgress('Reading repo info');
+  const { json: meta } = await ghFetch(`/repos/${owner}/${repo}`);
+  owner = meta.owner.login; repo = meta.name;
+  const branch = meta.default_branch;
+  onProgress('Reading languages');
+  const { json: languages } = await ghFetch(`/repos/${owner}/${repo}/languages`);
+  onProgress('Reading file tree');
+  const { json: tree } = await ghFetch(`/repos/${owner}/${repo}/git/trees/${encodeURIComponent(branch)}?recursive=1`);
+  const blobs = (tree.tree || []).filter((t) => t.type === 'blob').map((t) => ({ p: t.path, s: t.size || 0 }));
+  blobs.sort((a, b) => (a.p < b.p ? -1 : 1));
+  onProgress('Counting history');
+  const [commits, contributors, releases] = await Promise.all([
+    countOf(`/repos/${owner}/${repo}/commits`),
+    countOf(`/repos/${owner}/${repo}/contributors?anon=1`),
+    countOf(`/repos/${owner}/${repo}/releases`),
+  ]);
+
+  // choose files to read
+  const isManifest = (p) => MANIFESTS.includes(p.split('/').pop()) && p.split('/').length <= 3;
+  const wanted = blobs.filter((b) => (CODE_EXT[extOf(b.p)] || isManifest(b.p)) && b.s < 250000 && !/(^|\/)(node_modules|vendor|dist|build|\.git)\//.test(b.p) && !/\.min\.(js|css)$/.test(b.p));
+  // shallow paths first so every district gets sampled, then by path
+  wanted.sort((a, b) => (a.p.split('/').length - b.p.split('/').length) || (a.p < b.p ? -1 : 1));
+  const pick = []; let bytes = 0;
+  const manifestsFirst = wanted.filter((b) => isManifest(b.p)).concat(wanted.filter((b) => !isManifest(b.p)));
+  for (const b of manifestsFirst) { if (pick.length >= FILE_CAP || bytes + b.s > BYTE_CAP) break; pick.push(b); bytes += b.s; }
+  const readme = blobs.find((b) => /^readme(\.md|\.markdown|\.rst|\.txt)?$/i.test(b.p));
+  if (readme) pick.push(readme);
+
+  const files = {}; // path -> {lang, imp, m}
+  const manifests = [];
+  let done = 0; let readmeText = null;
+  await pool(pick, 12, async (b) => {
+    const text = await fetchRaw(owner, repo, branch, b.p);
+    done++;
+    if (done % 20 === 0 || done === pick.length) onProgress(`Reading files ${done} of ${pick.length}`);
+    if (text == null) return;
+    if (b === readme) { readmeText = text.slice(0, 150000); return; }
+    const name = b.p.split('/').pop();
+    if (isManifest(b.p)) { manifests.push({ path: b.p, ...parseManifest(name, text) }); if (!CODE_EXT[extOf(b.p)]) return; }
+    const lang = CODE_EXT[extOf(b.p)];
+    if (!lang) return;
+    files[b.p] = { lang, imp: parseImports(lang, b.p, text), m: fileMetrics(text) };
+  });
+
+  // keep the tree compact for very large repos
+  let treeOut = blobs, aggregated = false;
+  if (blobs.length > TREE_DETAIL_CAP) {
+    aggregated = true;
+    const agg = new Map();
+    for (const b of blobs) {
+      const parts = b.p.split('/');
+      const key = parts.length > 4 ? parts.slice(0, 4).join('/') + '/*' : b.p;
+      const e = agg.get(key) || { p: key, s: 0, n: 0 };
+      e.s += b.s; e.n += 1; agg.set(key, e);
+    }
+    treeOut = [...agg.values()];
+  }
+
+  return {
+    v: 1,
+    owner, repo, id: meta.id, branch,
+    meta: {
+      stars: meta.stargazers_count, forks: meta.forks_count, openIssues: meta.open_issues_count,
+      created: meta.created_at, pushed: meta.pushed_at, archived: !!meta.archived, fork: !!meta.fork,
+      parent: meta.parent ? meta.parent.full_name : null, description: meta.description || '',
+      ownerType: meta.owner.type, ownerId: meta.owner.id, size: meta.size, private: !!meta.private,
+    },
+    languages, tree: treeOut, treeCount: blobs.length, aggregated, truncated: !!tree.truncated,
+    files, manifests, readme: readmeText,
+    counts: { commits, contributors, releases },
+    sampled: { read: Object.keys(files).length, eligible: wanted.length },
+    scannedAt: Date.now(),
+  };
+}
+
+/* ---- town.js ---- */
+/* GitHoods town generator: scan object -> one shared layout used by every view.
+   Pure, deterministic rules. Units are "lots"; renderers scale them. */
+
+const STD_PY = new Set('abc argparse array ast asyncio base64 binascii bisect builtins bz2 calendar cmath collections colorsys concurrent configparser contextlib copy csv ctypes curses dataclasses datetime decimal difflib dis email enum errno faulthandler fcntl filecmp fnmatch fractions ftplib functools gc getopt getpass gettext glob gzip hashlib heapq hmac html http imaplib importlib inspect io ipaddress itertools json keyword locale logging lzma mailbox math mimetypes mmap multiprocessing netrc numbers operator optparse os pathlib pdb pickle pkgutil platform plistlib pprint profile pstats pty queue random re readline reprlib resource sched secrets select selectors shelve shlex shutil signal site smtplib socket socketserver sqlite3 ssl stat statistics string struct subprocess sys sysconfig tarfile tempfile termios textwrap threading time timeit tkinter token tokenize traceback tty turtle types typing unicodedata unittest urllib uuid venv warnings wave weakref webbrowser winreg wsgiref xml xmlrpc zipfile zipimport zlib zoneinfo __future__ msvcrt _thread'.split(' '));
+const STD_NODE = new Set('assert async_hooks buffer child_process cluster console constants crypto dgram diagnostics_channel dns domain events fs http http2 https inspector module net os path perf_hooks process punycode querystring readline repl stream string_decoder sys timers tls trace_events tty url util v8 vm wasi worker_threads zlib test sqlite'.split(' '));
+
+/* Known code sets -> unique buildings. Order matters: first match wins for a building's style. */
+const LANDMARKS = [
+  { key: 'observatory', label: 'Observatory', libs: ['three', 'three.js', 'babylonjs', '@babylonjs/core', 'aframe', 'pixi.js', 'p5', 'ogl', 'regl'] },
+  { key: 'theater', label: 'Theater', libs: ['react', 'react-dom', 'preact', 'solid-js', 'vue', 'svelte', '@angular/core', 'lit', 'htmx.org', 'alpinejs', '@solidjs/web'] },
+  { key: 'exchange', label: 'Exchange', libs: ['express', 'fastify', 'koa', 'hono', 'flask', 'django', 'fastapi', 'http.server', 'aiohttp', 'tornado', 'net/http', 'github.com/gin-gonic/gin', 'actix-web', 'axum', 'rocket', 'sinatra', 'rails', 'starlette', 'socketserver'] },
+  { key: 'depot', label: 'Packing depot', libs: ['pyinstaller', 'PyInstaller', 'electron-builder', 'webpack', 'vite', 'esbuild', 'rollup', 'tsdown', 'parcel'] },
+  { key: 'windowgate', label: 'Window gate', libs: ['webview', 'pywebview', 'electron', '@tauri-apps/api', 'tauri'] },
+  { key: 'lab', label: 'Lab', libs: ['torch', 'tensorflow', 'keras', 'sklearn', 'scikit-learn', 'jax', 'transformers', '@tensorflow/tfjs', 'onnxruntime', 'ultralytics', 'cv2', 'opencv-python'] },
+  { key: 'oracle', label: 'Oracle', libs: ['openai', '@anthropic-ai/sdk', 'anthropic', '@google/genai', 'ollama', 'langchain', 'llama_cpp'] },
+  { key: 'mill', label: 'Mill', libs: ['numpy', 'pandas', 'scipy', 'polars', 'd3', 'matplotlib', 'plotly', 'magick', 'PIL', 'pillow', 'sharp'] },
+  { key: 'vault', label: 'Vault', libs: ['sqlite3', 'kysely', 'sqlalchemy', 'pg', 'mongoose', 'prisma', '@prisma/client', 'redis', 'ioredis', 'mysql2', 'better-sqlite3', 'peewee', 'diesel', 'gorm.io/gorm'] },
+  { key: 'mast', label: 'Antenna mast', libs: ['RPi', 'RPi.GPIO', 'gpiozero', 'pigpio', 'onoff', 'smbus', 'smbus2', 'spidev', 'serial', 'pyserial', 'board', 'machine'] },
+  { key: 'automaton', label: 'Automaton works', libs: ['playwright', 'playwright-core', 'puppeteer', 'selenium', '@playwright/test'] },
+  { key: 'studio', label: 'Studio', libs: ['tkinter', 'PyQt5', 'PyQt6', 'PySide6', 'wx', 'gi', 'kivy', 'pygame', 'raylib'] },
+  { key: 'assay', label: 'Assay office', libs: ['zod', 'typebox', '@sinclair/typebox', 'pydantic', 'yup', 'joi', 'ajv'] },
+];
+const LIB2LANDMARK = new Map();
+LANDMARKS.forEach((l, i) => l.libs.forEach((n) => LIB2LANDMARK.set(n.toLowerCase(), { ...l, rank: i })));
+function landmarkFor(lib) { return LIB2LANDMARK.get(String(lib).toLowerCase()) || null; }
+
+const LANG_COLORS = {
+  typescript: '#D9EAE5', javascript: '#E3EED8', python: '#F2D3B6', swift: '#F7D9C4', kotlin: '#E3D6F5',
+  rust: '#EBCDBD', go: '#D4E9EC', c: '#DEE1E6', cpp: '#D8DCE6', java: '#ECDDC8', csharp: '#E2D9EC',
+  ruby: '#F2D1D6', php: '#DCD9EE', r: '#E3E7CB', html: '#F2E3C6', css: '#F4D6CC', shell: '#E2DED3',
+  markdown: '#F3EAD7', data: '#E8E4D8', image: '#F0E6D8', other: '#E6E1D6', dart: '#D6E8F2', lua: '#DCDCEF',
+  scala: '#F0D6D0', objc: '#E8DAD0', haskell: '#E0D8EA', elixir: '#E4D8EE', zig: '#F1E3C4', sql: '#E1E6D4',
+};
+const LANG_NAMES = { typescript: 'TypeScript', javascript: 'JavaScript', python: 'Python', swift: 'Swift', kotlin: 'Kotlin', rust: 'Rust', go: 'Go', c: 'C', cpp: 'C++', java: 'Java', csharp: 'C#', ruby: 'Ruby', php: 'PHP', r: 'R', html: 'HTML', css: 'CSS', shell: 'Shell', markdown: 'Markdown', data: 'Data', image: 'Images', other: 'Other', dart: 'Dart', lua: 'Lua', scala: 'Scala', objc: 'Objective-C', haskell: 'Haskell', elixir: 'Elixir', zig: 'Zig', sql: 'SQL' };
+
+function hashStr(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+function rng(seed) { let a = seed >>> 0; return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function titleCase(s) { return s.replace(/[_\-.]+/g, ' ').replace(/\s+/g, ' ').trim().replace(/\b\w/g, (c) => c.toUpperCase()); }
+function dirname(p) { const i = p.lastIndexOf('/'); return i < 0 ? '' : p.slice(0, i); }
+function basename(p) { return p.slice(p.lastIndexOf('/') + 1); }
+function joinPath(a, b) {
+  const parts = (a ? a.split('/') : []).concat(b.split('/'));
+  const out = [];
+  for (const s of parts) { if (!s || s === '.') continue; if (s === '..') out.pop(); else out.push(s); }
+  return out.join('/');
+}
+
+const IMG_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'heic', 'svg', 'ico']);
+const AUDIO_EXT = new Set(['mp3', 'wav', 'ogg', 'flac', 'm4a', 'aiff']);
+const VIDEO_EXT = new Set(['mp4', 'mov', 'webm', 'mkv', 'avi']);
+const DATA_EXT = new Set(['csv', 'tsv', 'json', 'yaml', 'yml', 'toml', 'xml', 'parquet', 'sqlite', 'db', 'geojson', 'ndjson', 'jsonl']);
+const TRASH_RE = /(^|\/)(__pycache__\/|\.DS_Store$|Thumbs\.db$)|\.(pyc|pyo|o|obj|class|log|tmp)$/;
+const ENTRY_RE = /^(main|app|index|server|cli|__main__|manage|run|start)\.(py|js|ts|mjs|go|rs|rb|php|html|kt|java|swift|c|cpp|cs|dart|lua|r|R)$/;
+
+function fileKind(path, sizeBytes, fileInfo) {
+  const b = basename(path), lower = b.toLowerCase(), ext = (b.includes('.') ? b.split('.').pop() : '').toLowerCase();
+  if (TRASH_RE.test(path)) return 'trash';
+  if (/^readme/i.test(b)) return 'library';
+  if (/^(license|licence|copying)/i.test(b)) return 'plaque';
+  if (lower === '.gitignore' || lower === '.dockerignore' || lower === '.npmignore') return 'fence';
+  if (/^dockerfile|docker-compose|compose\.ya?ml|fly\.toml|render\.yaml|vercel\.json|netlify\.toml|procfile$/i.test(b)) return 'port';
+  if (['package.json', 'requirements.txt', 'pyproject.toml', 'cargo.toml', 'go.mod', 'gemfile', 'composer.json', 'setup.py', 'pubspec.yaml', 'pnpm-workspace.yaml'].includes(lower)) return 'customs';
+  if (/\.(lock)$|lock\.(json|yaml)$|^go\.sum$/i.test(b)) return 'warehouse';
+  if (/^\.github\/workflows\//.test(path)) return 'works';
+  if (/(^|\/)(tests?|__tests__|spec|specs)\//.test(path) || /[._-](test|spec)\.\w+$/.test(b) || /^test_.*\.py$/.test(b)) return 'yard';
+  if (IMG_EXT.has(ext)) return 'gallery';
+  if (AUDIO_EXT.has(ext)) return 'concert';
+  if (VIDEO_EXT.has(ext)) return 'cinema';
+  if (lower === '__init__.py' && sizeBytes === 0) return 'stake';
+  if (/\.spec$/.test(b)) return 'depot';
+  if (DATA_EXT.has(ext) && sizeBytes > 20000) return 'warehouse';
+  if (ext === 'md' || ext === 'rst' || ext === 'txt') return 'reading';
+  if (ENTRY_RE.test(b) && path.split('/').length <= 2) return 'hall';
+  return 'house';
+}
+
+function langOfPath(p) {
+  const ext = p.includes('.') ? p.split('.').pop() : '';
+  const l = CODE_EXT[ext] || CODE_EXT[ext.toLowerCase()];
+  if (l) return l;
+  const e = ext.toLowerCase();
+  if (e === 'md' || e === 'rst' || e === 'txt') return 'markdown';
+  if (IMG_EXT.has(e)) return 'image';
+  if (DATA_EXT.has(e)) return 'data';
+  return 'other';
+}
+
+/* ---------- import resolution ---------- */
+function makeResolver(scan, pathSet) {
+  const byBase = new Map();
+  const dirSet = new Set();
+  for (const p of pathSet) {
+    const b = basename(p); if (!byBase.has(b)) byBase.set(b, []); byBase.get(b).push(p);
+    let d = dirname(p); while (d && !dirSet.has(d)) { dirSet.add(d); d = dirname(d); }
+  }
+  const pkgDirs = new Map(); // workspace package name -> dir
+  let goModule = null;
+  const declared = new Map();
+  for (const m of scan.manifests || []) {
+    if (m.pkgName) pkgDirs.set(m.pkgName, dirname(m.path));
+    if (m.goModule) goModule = m.goModule;
+    for (const [n, k] of Object.entries(m.deps || {})) if (!declared.has(n) || k === 'run') declared.set(n, k);
+  }
+  for (const n of pkgDirs.keys()) declared.delete(n);
+  const JS_EXT = ['', '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.vue', '.svelte', '.json', '/index.ts', '/index.tsx', '/index.js', '/index.jsx', '/index.mjs'];
+  const has = (p) => pathSet.has(p);
+
+  function jsLocal(base) {
+    for (const e of JS_EXT) if (has(base + e)) return base + e;
+    const m = base.match(/^(.*)\.(js|mjs|cjs|jsx)$/);
+    if (m) for (const e of ['.ts', '.tsx', '.mts']) if (has(m[1] + e)) return m[1] + e;
+    return null;
+  }
+  function pkgName(spec) { const parts = spec.split('/'); return spec.startsWith('@') ? parts.slice(0, 2).join('/') : parts[0]; }
+  function cdnName(url) {
+    let m = url.match(/cdnjs\.cloudflare\.com\/ajax\/libs\/([^/]+)/); if (m) return m[1];
+    m = url.match(/(?:cdn\.jsdelivr\.net\/npm|unpkg\.com|esm\.sh|cdn\.skypack\.dev)\/(@[^/@]+\/[^/@]+|[^/@]+)/); if (m) return m[1];
+    m = url.match(/code\.jquery\.com/); if (m) return 'jquery';
+    m = url.match(/^https?:\/\/([^/]+)/); return m ? m[1] : null;
+  }
+
+  function resolve(from, lang, spec) {
+    const dir = dirname(from);
+    if (lang === 'javascript' || lang === 'typescript' || lang === 'html' || lang === 'css') {
+      if (/^https?:\/\//.test(spec) || spec.startsWith('//')) { const n = cdnName(spec.startsWith('//') ? 'https:' + spec : spec); return n ? { ext: n.replace(/\.min$/, '') } : null; }
+      if (spec.startsWith('.') || spec.startsWith('/') || (lang === 'html' || lang === 'css') && !spec.includes(':')) {
+        const base = spec.startsWith('/') ? spec.slice(1) : joinPath(dir, spec.split('?')[0]);
+        const hit = jsLocal(base);
+        return hit ? { int: hit } : null;
+      }
+      if (spec.startsWith('node:')) return { std: spec };
+      const pn = pkgName(spec);
+      if (STD_NODE.has(pn)) return { std: pn };
+      if (pkgDirs.has(pn)) { const d = pkgDirs.get(pn); const rest = spec.slice(pn.length); const hit = jsLocal(joinPath(d, rest || 'index')) || jsLocal(joinPath(d, 'src' + (rest || '/index'))); return { int: hit || d, dir: !hit }; }
+      return { ext: pn };
+    }
+    if (lang === 'python') {
+      if (spec.startsWith('.')) {
+        const dots = spec.match(/^\.+/)[0].length;
+        let base = dir; for (let i = 1; i < dots; i++) base = dirname(base);
+        const rest = spec.slice(dots).replace(/\./g, '/');
+        const p = rest ? joinPath(base, rest) : base;
+        if (has(p + '.py')) return { int: p + '.py' };
+        if (has(p + '/__init__.py')) return { int: p + '/__init__.py' };
+        return null;
+      }
+      const top = spec.split('.')[0];
+      if (STD_PY.has(top)) return { std: spec.split('.').slice(0, 2).join('.') };
+      const rel = spec.replace(/\./g, '/');
+      const roots = ['', 'src/', dir ? dir.split('/')[0] + '/' : '', dir ? dir + '/' : ''];
+      for (const r of roots) {
+        if (has(r + rel + '.py')) return { int: r + rel + '.py' };
+        if (has(r + rel + '/__init__.py')) return { int: r + rel + '/__init__.py' };
+      }
+      for (const r of roots) { if (dirSet.has(r + top)) return null; }
+      return { ext: top };
+    }
+    if (lang === 'go') {
+      if (goModule && spec.startsWith(goModule)) { const d = spec.slice(goModule.length + 1); return dirSet.has(d) ? { int: d, dir: true } : null; }
+      const first = spec.split('/')[0];
+      if (!first.includes('.')) return { std: spec };
+      const parts = spec.split('/');
+      return { ext: parts.slice(0, first === 'github.com' || first === 'gitlab.com' ? 3 : 2).join('/') };
+    }
+    if (lang === 'rust') {
+      if (spec.startsWith('mod::')) { const n = spec.slice(5); for (const c of [joinPath(dir, n + '.rs'), joinPath(dir, n + '/mod.rs')]) if (has(c)) return { int: c }; return null; }
+      const first = spec.split('::')[0];
+      if (['std', 'core', 'alloc'].includes(first)) return { std: first };
+      if (['crate', 'super', 'self'].includes(first)) {
+        const segs = spec.split('::').slice(1);
+        const root = dir.includes('src') ? dir.slice(0, dir.indexOf('src') + 3) : dir;
+        for (let k = segs.length; k > 0; k--) { const p = joinPath(root, segs.slice(0, k).join('/')); if (has(p + '.rs')) return { int: p + '.rs' }; if (has(p + '/mod.rs')) return { int: p + '/mod.rs' }; }
+        return null;
+      }
+      return { ext: first.replace(/_/g, '-') };
+    }
+    if (lang === 'java' || lang === 'kotlin' || lang === 'scala') {
+      const p = spec.replace(/\./g, '/');
+      const nm = p.split('/').pop();
+      for (const e of ['.java', '.kt', '.scala']) { const c = (byBase.get(nm + e) || []).find((x) => x.endsWith(p + e)); if (c) return { int: c }; }
+      if (/^(java|javax|kotlin|scala|android)\./.test(spec)) return { std: spec.split('.')[0] };
+      return { ext: spec.split('.').slice(0, 2).join('.') };
+    }
+    if (lang === 'c' || lang === 'cpp' || lang === 'objc') {
+      const local = spec[0] === '"'; const name = spec.slice(1);
+      const c = joinPath(dir, name); if (has(c)) return { int: c };
+      const cands = byBase.get(basename(name));
+      if (cands && cands.length) return { int: cands[0] };
+      return local ? null : { std: name };
+    }
+    if (lang === 'ruby' || lang === 'php' || lang === 'r' || lang === 'lua' || lang === 'dart') {
+      if (spec.startsWith('./') || spec.startsWith('../')) {
+        const base = joinPath(dir, spec);
+        for (const e of ['', '.rb', '.php', '.R', '.r', '.lua', '.dart']) if (has(base + e)) return { int: base + e };
+        return null;
+      }
+      if (lang === 'dart' && spec.startsWith('package:')) return { ext: spec.slice(8).split('/')[0] };
+      if (lang === 'dart' && !spec.includes(':')) { const c = joinPath(dir, spec); return has(c) ? { int: c } : null; }
+      return { ext: spec.split(/[\\/]/)[0] };
+    }
+    if (lang === 'swift') return ['Foundation', 'UIKit', 'SwiftUI', 'AppKit', 'Combine', 'os', 'Darwin', 'XCTest', 'CoreGraphics', 'AVFoundation'].includes(spec) ? { std: spec } : { ext: spec };
+    if (lang === 'csharp' || lang === 'fsharp') return /^(System|Microsoft)\b/.test(spec) ? { std: spec.split('.')[0] } : { ext: spec.split('.').slice(0, 2).join('.') };
+    return null;
+  }
+  return { resolve, declared, pkgDirs };
+}
+
+/* ---- town_build.js ---- */
+/* ---------- town generation ---------- */
+const PKG_ALIAS = { pywebview: 'webview', pillow: 'PIL', 'opencv-python': 'cv2', 'opencv-python-headless': 'cv2', 'scikit-learn': 'sklearn', pyserial: 'serial', beautifulsoup4: 'bs4', pyyaml: 'yaml', 'python-dotenv': 'dotenv', 'rpi.gpio': 'RPi', pyinstaller: 'PyInstaller', 'three.js': 'three', 'three.min.js': 'three' };
+function pkgAlias(n) { return PKG_ALIAS[n] || PKG_ALIAS[String(n).toLowerCase()] || n; }
+
+function squarify(items, x, y, w, h) {
+  // items: [{v, ...}] sorted desc; returns items with rect {x,y,w,h}
+  const total = items.reduce((a, b) => a + b.v, 0) || 1;
+  const scale = (w * h) / total;
+  const nodes = items.map((it) => ({ it, a: it.v * scale }));
+  const out = [];
+  let rx = x, ry = y, rw = w, rh = h;
+  let row = [];
+  const worst = (row, side) => {
+    const s = row.reduce((a, b) => a + b.a, 0); let mx = 0, mn = Infinity;
+    row.forEach((r) => { mx = Math.max(mx, r.a); mn = Math.min(mn, r.a); });
+    return Math.max((side * side * mx) / (s * s), (s * s) / (side * side * mn));
+  };
+  const layoutRow = (row) => {
+    const s = row.reduce((a, b) => a + b.a, 0);
+    if (rw >= rh) { const cw = s / rh; let cy = ry; row.forEach((r) => { const ch = r.a / cw; out.push({ ...r.it, rect: { x: rx, y: cy, w: cw, h: ch } }); cy += ch; }); rx += cw; rw -= cw; }
+    else { const ch = s / rw; let cx = rx; row.forEach((r) => { const cww = r.a / ch; out.push({ ...r.it, rect: { x: cx, y: ry, w: cww, h: ch } }); cx += cww; }); ry += ch; rh -= ch; }
+  };
+  let i = 0;
+  while (i < nodes.length) {
+    const side = Math.min(rw, rh);
+    const n = nodes[i];
+    if (!row.length || worst(row.concat(n), side) <= worst(row, side)) { row.push(n); i++; }
+    else { layoutRow(row); row = []; }
+  }
+  if (row.length) layoutRow(row);
+  return out;
+}
+
+function packShelves(bs, rect, gap) {
+  // bs: [{side}] sorted desc. Finds the largest scale <= 1 that fits. Mutates bs with x,y,w.
+  const tryScale = (s) => {
+    let x = 0, y = 0, rowH = 0; const pos = [];
+    for (const b of bs) {
+      const w = b.side * s;
+      if (x > 0 && x + w > rect.w + 1e-6) { x = 0; y += rowH + gap; rowH = 0; }
+      pos.push([x, y, w]); x += w + gap; rowH = Math.max(rowH, w);
+    }
+    return { pos, h: y + rowH };
+  };
+  let lo = 0.05, hi = 1, best = tryScale(lo);
+  const full = tryScale(1);
+  if (full.h <= rect.h) best = full;
+  else {
+    for (let k = 0; k < 18; k++) { const mid = (lo + hi) / 2; const r = tryScale(mid); if (r.h <= rect.h) { lo = mid; best = r; } else hi = mid; }
+  }
+  // center the packed block vertically a little
+  const offY = Math.max(0, (rect.h - best.h) / 2) * 0.5;
+  bs.forEach((b, i) => { const [px, py, w] = best.pos[i]; b.x = rect.x + px; b.y = rect.y + py + offY; b.w = w; b.d = w; });
+}
+
+function buildTown(scan) {
+  const notes = [];
+  const files = scan.files || {};
+  const codeFileCount = Object.values(files).filter((f) => !['html', 'css'].includes(f.lang)).length;
+  if (scan.readme && codeFileCount <= 3) {
+    const lt = buildListTown(scan);
+    if (lt) return lt;
+  }
+  const tree = (scan.tree || []).filter((t) => !/(^|\/)\.git\//.test(t.p));
+  const pathSet = new Set(tree.map((t) => t.p));
+  Object.keys(files).forEach((p) => pathSet.add(p));
+  const { resolve, declared } = makeResolver(scan, pathSet);
+
+  // ---- weights per path
+  const entries = tree.map((t) => {
+    const f = files[t.p];
+    const lang = t.p.endsWith('/*') ? 'other' : langOfPath(t.p);
+    let lines = f ? f.m.lines : (CODE_EXT[(t.p.split('.').pop() || '')] ? Math.round(t.s / 34) : Math.round(t.s / 60));
+    if (lang === 'image' || lang === 'data') lines = Math.round(Math.min(t.s, 2e6) / 400);
+    return { p: t.p, s: t.s, n: t.n || 1, lang, lines: Math.max(1, lines), f };
+  });
+
+  // ---- districts
+  const isHidden = (seg) => seg.startsWith('.');
+  const groups = new Map(); // key -> {key, prefix, entries}
+  const civic = { key: '::civic', prefix: '', label: 'Civic quarter', entries: [], civic: true };
+  for (const e of entries) {
+    const segs = e.p.split('/');
+    if (segs.length === 1 || isHidden(segs[0])) { civic.entries.push(e); continue; }
+    const k = segs[0];
+    if (!groups.has(k)) groups.set(k, { key: k, prefix: k + '/', label: titleCase(k), entries: [] });
+    groups.get(k).entries.push(e);
+  }
+  const weightOf = (g) => g.entries.reduce((a, e) => a + e.lines, 0);
+  let districts = [...groups.values()];
+  const totalW = () => districts.reduce((a, g) => a + weightOf(g), 0) + weightOf(civic);
+  for (let iter = 0; iter < 6 && districts.length < 14; iter++) {
+    const T = totalW();
+    const big = districts.filter((g) => weightOf(g) > 0.42 * T).sort((a, b) => weightOf(b) - weightOf(a))[0];
+    if (!big) break;
+    const sub = new Map(); const direct = [];
+    for (const e of big.entries) {
+      const rest = e.p.slice(big.prefix.length);
+      const s = rest.split('/');
+      if (s.length === 1) { direct.push(e); continue; }
+      if (!sub.has(s[0])) sub.set(s[0], { key: big.prefix + s[0], prefix: big.prefix + s[0] + '/', label: titleCase(s[0]), parent: big.label, entries: [] });
+      sub.get(s[0]).entries.push(e);
+    }
+    if (sub.size < 2) break;
+    districts = districts.filter((g) => g !== big);
+    if (direct.length) districts.push({ key: big.key, prefix: big.prefix, label: big.label, entries: direct, rootOf: true });
+    districts.push(...sub.values());
+  }
+  districts.sort((a, b) => weightOf(b) - weightOf(a) || (a.key < b.key ? -1 : 1));
+  if (districts.length > 15) {
+    const keep = districts.slice(0, 14), rest = districts.slice(14);
+    keep.push({ key: '::outskirts', prefix: null, label: 'Outskirts', entries: rest.flatMap((g) => g.entries), outskirts: rest.map((g) => g.label) });
+    districts = keep;
+  }
+  // fold tiny districts (a lone __init__ etc.) into their biggest sibling
+  if (districts.length > 1) {
+    const tiny = districts.filter((g) => weightOf(g) < 5 && g.entries.length <= 2);
+    for (const t of tiny) {
+      const host = districts.filter((g) => g !== t && !tiny.includes(g)).sort((a, b) => weightOf(b) - weightOf(a))[0];
+      if (host) { host.entries.push(...t.entries); districts = districts.filter((g) => g !== t); }
+    }
+  }
+  // small flat repos: every substantial root code file gets its own lot so streets can run between them
+  if (districts.length < 2) {
+    const lotFiles = civic.entries.filter((e) => e.p.split('/').length === 1 && e.f && !['shell', 'css'].includes(e.lang) && e.lines >= 20 && ['house', 'hall'].includes(fileKind(e.p, e.s, e.f)));
+    if (lotFiles.length >= 2) {
+      for (const e of lotFiles) {
+        civic.entries = civic.entries.filter((x) => x !== e);
+        districts.push({ key: '::lot:' + e.p, prefix: '', label: titleCase(e.p.replace(/\.[^.]+$/, '')), entries: [e], lot: true });
+      }
+    }
+  }
+  // disambiguate labels
+  const seen = new Map();
+  districts.forEach((g) => { const c = (seen.get(g.label) || 0) + 1; seen.set(g.label, c); if (c > 1 && g.parent) g.label = g.parent + ' ' + g.label; });
+  if (civic.entries.length) districts.push(civic);
+
+  // ---- buildings
+  const buildings = [];
+  const pathToB = new Map();
+  const mkB = (o) => { o.id = buildings.length; buildings.push(o); return o; };
+  districts.forEach((g, gi) => {
+    g.id = gi;
+    const es = g.entries;
+    const nFiles = es.reduce((a, e) => a + e.n, 0);
+    if (g.civic) {
+      // root files individually; hidden dirs aggregated
+      const hidden = new Map();
+      for (const e of es) {
+        const segs = e.p.split('/');
+        if (segs.length > 1) { const k = segs[0]; if (!hidden.has(k)) hidden.set(k, []); hidden.get(k).push(e); continue; }
+        mkB({ name: e.p, path: e.p, files: 1, lines: e.lines, bytes: e.s, lang: e.lang, kind: fileKind(e.p, e.s, e.f), district: gi, paths: [e.p] });
+      }
+      for (const [k, list] of hidden) {
+        const wf = list.filter((e) => /^\.github\/workflows\//.test(e.p));
+        const kind = k === '.github' && wf.length ? 'works' : 'shed';
+        mkB({ name: k + '/', path: k, files: list.length, lines: list.reduce((a, e) => a + e.lines, 0), bytes: list.reduce((a, e) => a + e.s, 0), lang: 'other', kind, district: gi, paths: list.map((e) => e.p), workflows: wf.length });
+      }
+      return;
+    }
+    const rel = (p) => (g.prefix ? p.slice(g.prefix.length) : p);
+    if (nFiles <= 90 && !g.outskirts) {
+      for (const e of es) mkB({ name: rel(e.p), path: e.p, files: e.n, lines: e.lines, bytes: e.s, lang: e.lang, kind: fileKind(e.p, e.s, e.f), district: gi, paths: [e.p] });
+    } else {
+      const kids = new Map();
+      for (const e of es) {
+        const r = g.outskirts ? e.p : rel(e.p);
+        const s = r.split('/');
+        const k = g.outskirts ? s.slice(0, 2).join('/') : s[0];
+        const isDir = g.outskirts ? s.length > 2 : s.length > 1;
+        if (!kids.has(k)) kids.set(k, { k, isDir, list: [] });
+        kids.get(k).list.push(e);
+        if (isDir) kids.get(k).isDir = true;
+      }
+      let arr = [...kids.values()].map((c) => ({ ...c, lines: c.list.reduce((a, e) => a + e.lines, 0) }));
+      arr.sort((a, b) => b.lines - a.lines || (a.k < b.k ? -1 : 1));
+      const dirCount = arr.filter((c) => c.isDir).length;
+      const hutMode = dirCount >= 20;
+      let rest = [];
+      if (arr.length > 70) { rest = arr.slice(69); arr = arr.slice(0, 69); }
+      for (const c of arr) {
+        const langs = new Map(); c.list.forEach((e) => langs.set(e.lang, (langs.get(e.lang) || 0) + e.lines));
+        const lang = [...langs.entries()].sort((a, b) => b[1] - a[1])[0][0];
+        const single = !c.isDir && c.list.length === 1;
+        mkB({
+          name: c.k + (c.isDir ? '/' : ''), path: (g.prefix || '') + c.k, files: c.list.reduce((a, e) => a + e.n, 0), lines: c.lines,
+          bytes: c.list.reduce((a, e) => a + e.s, 0), lang, kind: single ? fileKind(c.list[0].p, c.list[0].s, c.list[0].f) : (hutMode ? 'hut' : 'block'),
+          district: gi, paths: c.list.map((e) => e.p), folder: c.isDir,
+        });
+      }
+      if (rest.length) {
+        mkB({ name: `+${rest.length} more`, path: (g.prefix || '') + '…', files: rest.reduce((a, c) => a + c.list.length, 0), lines: rest.reduce((a, c) => a + c.lines, 0), bytes: 0, lang: 'other', kind: 'hutcluster', district: gi, paths: rest.flatMap((c) => c.list.map((e) => e.p)), count: rest.length });
+      }
+    }
+  });
+  buildings.forEach((b) => b.paths.forEach((p) => pathToB.set(p, b.id)));
+  // directory prefixes -> building (for dir-level resolutions)
+  const bByDir = (d) => { for (const b of buildings) if (b.folder && (d === b.path || d.startsWith(b.path + '/'))) return b.id; const hit = buildings.find((b) => b.paths.some((p) => p.startsWith(d + '/'))); return hit ? hit.id : null; };
+
+  // ---- imports -> edges
+  const edges = new Map(); // "a>b" -> n
+  const ext = new Map(); // name -> {n, byB: Map}
+  const stdCount = { n: 0 };
+  const metricsByB = new Map();
+  for (const [p, f] of Object.entries(files)) {
+    const from = pathToB.get(p); if (from == null) continue;
+    const mb = metricsByB.get(from) || { routes: 0, canvas: 0, gpio: 0, storage: 0, classes: 0, fns: 0, fetchLocal: 0 };
+    for (const k of Object.keys(mb)) mb[k] += f.m[k] || 0;
+    metricsByB.set(from, mb);
+    for (const spec of f.imp) {
+      const r = resolve(p, f.lang, spec);
+      if (!r) continue;
+      if (r.std) {
+        stdCount.n++;
+        const key = landmarkFor(r.std) ? r.std : (landmarkFor(r.std.split('.')[0]) ? r.std.split('.')[0] : null);
+        if (key) { const e = ext.get(key) || { n: 0, byB: new Map(), std: true }; e.n++; e.byB.set(from, (e.byB.get(from) || 0) + 1); ext.set(key, e); }
+        continue;
+      }
+      if (r.ext) { const nmx = pkgAlias(r.ext); const e = ext.get(nmx) || { n: 0, byB: new Map() }; e.n++; e.byB.set(from, (e.byB.get(from) || 0) + 1); ext.set(nmx, e); continue; }
+      if (r.int) {
+        const to = r.dir ? bByDir(r.int) : (pathToB.has(r.int) ? pathToB.get(r.int) : bByDir(r.int));
+        if (to == null || to === from) continue;
+        const k = from + '>' + to; edges.set(k, (edges.get(k) || 0) + 1);
+      }
+    }
+  }
+  // PyInstaller spec files and Dockerfiles count as declared tools
+  const specFile = [...pathSet].find((p) => /\.spec$/.test(p) && !/\.(js|ts|rb)$/.test(p));
+  if (specFile) { const e = ext.get('PyInstaller') || { n: 0, byB: new Map() }; e.build = true; if (pathToB.has(specFile)) e.byB.set(pathToB.get(specFile), 1); ext.set('PyInstaller', e); }
+  for (const [n, k] of declared) { const key = pkgAlias(n); if (!ext.has(key)) ext.set(key, { n: 0, byB: new Map(), declaredOnly: true }); ext.get(key).declared = k; }
+
+  // service roads: pages that call the repo's own HTTP routes connect to the server building
+  const servers = [...metricsByB.entries()].filter(([, m]) => m.routes >= 2).map(([id]) => id);
+  if (servers.length) {
+    for (const [id, m] of metricsByB) {
+      if (!m.fetchLocal || servers.includes(id)) continue;
+      const to = servers[0]; const k = id + '>' + to; edges.set(k, (edges.get(k) || 0) + m.fetchLocal);
+    }
+  }
+  buildings.forEach((b) => { b.inDeg = 0; b.outDeg = 0; b.importers = []; b.m = metricsByB.get(b.id) || null; });
+  for (const [k, n] of edges) { const [a, c] = k.split('>').map(Number); buildings[a].outDeg += n; buildings[c].inDeg += n; buildings[c].importers.push(a); }
+
+  // ---- special kinds
+  const cand = buildings.filter((b) => !['library', 'plaque', 'fence', 'customs', 'yard', 'gallery', 'trash'].includes(b.kind));
+  const byIn = [...cand].sort((a, b) => b.inDeg - a.inDeg || a.id - b.id);
+  const specials = [];
+  const nm = (b) => basename(b.path).toLowerCase();
+  const pickSpecial = (test, kind, minIn) => { const b = byIn.find((x) => x.inDeg >= minIn && !x.special && test(x)); if (b) { b.special = kind; specials.push(b); } };
+  pickSpecial((b) => /config|settings|constants|env/.test(nm(b)), 'power', 3);
+  pickSpecial((b) => /theme|style|palette|colou?rs|tokens/.test(nm(b)), 'dyeworks', 3);
+  pickSpecial((b) => /util|helper|common|infra|shared|lib\b|core/.test(nm(b)), 'water', 5);
+  if (byIn[0] && byIn[0].inDeg >= 3 && !byIn[0].special) { byIn[0].special = 'square'; specials.push(byIn[0]); }
+  else { const b = byIn.find((x) => x.inDeg >= 3 && !x.special); if (b) { b.special = 'square'; specials.push(b); } }
+  buildings.forEach((b) => {
+    if (b.special) return;
+    if (/^(__init__\.py|index\.(ts|js|mjs))$/.test(nm(b)) && b.outDeg >= 4 && b.inDeg >= 1) b.special = 'gate';
+  });
+  // landmarks: building's style from known libraries it imports
+  for (const [name, e] of ext) {
+    const lm = landmarkFor(name);
+    if (!lm || !e.byB.size) continue;
+    // the building that leans on this library hardest becomes its landmark
+    const top = [...e.byB.entries()].sort((a, b) => b[1] - a[1] || buildings[b[0]].lines - buildings[a[0]].lines)[0][0];
+    const b = buildings[top];
+    if (!b.landmark || lm.rank < b.landmark.rank) b.landmark = { key: lm.key, label: lm.label, lib: name, rank: lm.rank };
+  }
+  buildings.forEach((b) => {
+    const m = b.m || {};
+    b.deco = {
+      doors: b.landmark && b.landmark.key === 'exchange' ? Math.max(2, Math.min(12, m.routes || 0)) : 0,
+      screen: m.canvas > 0 ? 1 : 0, mast: m.gpio > 0 || (b.landmark && b.landmark.key === 'mast') ? 1 : 0,
+      silo: m.storage > 0 ? 1 : 0, tiers: m.classes > 4 && b.files === 1 && b.lines > 1500 ? Math.min(10, m.classes) : 0,
+    };
+  });
+
+  // ---- layout
+  const sideOf = (b) => {
+    if (b.kind === 'hut') return 0.55 + 0.06 * Math.log10(1 + b.lines);
+    if (b.kind === 'hutcluster') return 0.9;
+    if (['stake', 'fence', 'plaque', 'trash'].includes(b.kind)) return 0.5;
+    return 0.75 + 0.5 * Math.log10(1 + b.lines);
+  };
+  buildings.forEach((b) => { b.side = sideOf(b); b.h = b.kind === 'hut' ? 0.5 + 0.15 * Math.log10(1 + b.lines) : 0.35 + 0.7 * Math.log10(1 + b.lines); });
+  const dItems = districts.map((g) => {
+    const bs = buildings.filter((b) => b.district === g.id);
+    const area = bs.reduce((a, b) => a + (b.side + 0.3) ** 2, 0) * 1.25 + 2;
+    return { g, bs, v: area };
+  }).sort((a, b) => b.v - a.v || (a.g.key < b.g.key ? -1 : 1));
+  const A = dItems.reduce((a, d) => a + d.v, 0);
+  const GUT = 1.0;
+  const W = Math.sqrt(A * 1.3) + GUT * Math.sqrt(districts.length), H = (A / Math.sqrt(A * 1.3)) + GUT * Math.sqrt(districts.length);
+  const tm = squarify(dItems, 0, 0, W, H);
+  const dOut = [];
+  for (const it of tm) {
+    const r = { x: it.rect.x + GUT / 2, y: it.rect.y + GUT / 2, w: Math.max(0.6, it.rect.w - GUT), h: Math.max(0.6, it.rect.h - GUT) };
+    const inner = { x: r.x + 0.25, y: r.y + 0.55, w: Math.max(0.3, r.w - 0.5), h: Math.max(0.3, r.h - 0.75) };
+    const bs = it.bs.sort((a, b) => (b.landmark ? 1 : 0) - (a.landmark ? 1 : 0) || b.side - a.side || (a.name < b.name ? -1 : 1));
+    packShelves(bs, inner, 0.22);
+    const langs = new Map(); bs.forEach((b) => langs.set(b.lang, (langs.get(b.lang) || 0) + b.lines));
+    const top = [...langs.entries()].sort((a, b) => b[1] - a[1])[0];
+    dOut.push({ id: it.g.id, key: it.g.key, label: it.g.label, civic: !!it.g.civic, outskirts: it.g.outskirts || null, x: r.x, y: r.y, w: r.w, h: r.h, lang: top ? top[0] : 'other', lines: bs.reduce((a, b) => a + b.lines, 0), files: bs.reduce((a, b) => a + b.files, 0), bcount: bs.length });
+  }
+  const dById = new Map(dOut.map((d) => [d.id, d]));
+
+  // ---- district traffic + routed streets
+  const dEdges = new Map();
+  for (const [k, n] of edges) { const [a, c] = k.split('>').map(Number); const da = buildings[a].district, dc = buildings[c].district; if (da === dc) continue; const kk = da + '>' + dc; dEdges.set(kk, (dEdges.get(kk) || 0) + n); }
+  const inbound = new Map(); for (const [k, n] of dEdges) { const t = +k.split('>')[1]; inbound.set(t, (inbound.get(t) || 0) + n); }
+  const totalTraffic = [...dEdges.values()].reduce((a, b) => a + b, 0);
+  const CELL = Math.max(0.2, Math.min(0.5, Math.max(W, H) / 140));
+  const gx = Math.ceil((W + 2) / CELL), gy = Math.ceil((H + 2) / CELL);
+  const ox = -1, oy = -1;
+  const blocked = new Uint8Array(gx * gy);
+  for (const d of dOut) {
+    const x0 = Math.floor((d.x - ox) / CELL), x1 = Math.ceil((d.x + d.w - ox) / CELL), y0 = Math.floor((d.y - oy) / CELL), y1 = Math.ceil((d.y + d.h - oy) / CELL);
+    for (let y = Math.max(0, y0); y < Math.min(gy, y1); y++) for (let x = Math.max(0, x0); x < Math.min(gx, x1); x++) blocked[y * gx + x] = 1;
+  }
+  const cellC = (i) => [ox + ((i % gx) + 0.5) * CELL, oy + (Math.floor(i / gx) + 0.5) * CELL];
+  const borderCells = (d) => {
+    const out = [];
+    const x0 = Math.floor((d.x - ox) / CELL) - 1, x1 = Math.ceil((d.x + d.w - ox) / CELL), y0 = Math.floor((d.y - oy) / CELL) - 1, y1 = Math.ceil((d.y + d.h - oy) / CELL);
+    for (let x = x0; x <= x1; x++) for (const y of [y0, y1]) if (x >= 0 && y >= 0 && x < gx && y < gy && !blocked[y * gx + x]) out.push(y * gx + x);
+    for (let y = y0; y <= y1; y++) for (const x of [x0, x1]) if (x >= 0 && y >= 0 && x < gx && y < gy && !blocked[y * gx + x]) out.push(y * gx + x);
+    return out;
+  };
+  const route = (A, B) => {
+    const starts = borderCells(A), goals = new Set(borderCells(B));
+    if (!starts.length || !goals.size) return null;
+    const bc = [B.x + B.w / 2, B.y + B.h / 2];
+    starts.sort((i, j) => { const a = cellC(i), b = cellC(j); return Math.hypot(a[0] - bc[0], a[1] - bc[1]) - Math.hypot(b[0] - bc[0], b[1] - bc[1]); });
+    const start = starts[0];
+    const prev = new Int32Array(gx * gy).fill(-1); prev[start] = start;
+    const q = [start]; let head = 0, hit = -1;
+    while (head < q.length) {
+      const c = q[head++]; if (goals.has(c)) { hit = c; break; }
+      const x = c % gx, y = (c / gx) | 0;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= gx || ny >= gy) continue;
+        const ni = ny * gx + nx; if (blocked[ni] || prev[ni] !== -1) continue; prev[ni] = c; q.push(ni);
+      }
+    }
+    if (hit < 0) return null;
+    const cells = []; for (let c = hit; ; c = prev[c]) { cells.push(c); if (c === start) break; }
+    cells.reverse();
+    return cells;
+  };
+  const segTraffic = new Map(); // "i-j" -> traffic
+  const streets = [];
+  const rankedTargets = [...inbound.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]);
+  const suffixFor = (rank, t) => (rank === 0 ? 'Ave' : rank < 3 ? 'St' : t >= 10 ? 'Rd' : 'Ln');
+  const usedNames = new Set();
+  rankedTargets.forEach(([dt, tIn], rank) => {
+    const D = dById.get(dt); if (!D) return;
+    let base = D.civic ? 'Civic' : D.label;
+    let name = base + ' ' + suffixFor(rank, tIn);
+    if (usedNames.has(name)) name = base + ' Way'; usedNames.add(name);
+    const st = { name, target: dt, traffic: tIn, routes: [] };
+    for (const [k, n] of dEdges) {
+      const [da, dc] = k.split('>').map(Number); if (dc !== dt) continue;
+      if (n < Math.max(1, totalTraffic * 0.004)) continue;
+      const cells = route(dById.get(da), D); if (!cells) continue;
+      for (let i = 1; i < cells.length; i++) { const a = Math.min(cells[i - 1], cells[i]), b = Math.max(cells[i - 1], cells[i]); const key = a + '-' + b; segTraffic.set(key, (segTraffic.get(key) || 0) + n); }
+      st.routes.push({ from: da, n, pts: simplify(cells.map(cellC)) });
+    }
+    if (st.routes.length) streets.push(st);
+  });
+  function simplify(pts) { if (pts.length < 3) return pts; const out = [pts[0]]; for (let i = 1; i < pts.length - 1; i++) { const a = out[out.length - 1], b = pts[i], c = pts[i + 1]; if ((a[0] === b[0] && b[0] === c[0]) || (a[1] === b[1] && b[1] === c[1])) continue; out.push(b); } out.push(pts[pts.length - 1]); return out; }
+  const segs = [];
+  for (const [k, t] of segTraffic) { const [a, b] = k.split('-').map(Number); segs.push({ a: cellC(a), b: cellC(b), t }); }
+  // label anchor: longest straight run of the street's busiest route
+  streets.forEach((st) => {
+    const r = st.routes.sort((a, b) => b.n - a.n)[0];
+    let best = null, bl = -1;
+    for (let i = 1; i < r.pts.length; i++) { const L = Math.hypot(r.pts[i][0] - r.pts[i - 1][0], r.pts[i][1] - r.pts[i - 1][1]); if (L > bl) { bl = L; best = [r.pts[i - 1], r.pts[i]]; } }
+    st.label = best ? { x: (best[0][0] + best[1][0]) / 2, y: (best[0][1] + best[1][1]) / 2, horiz: Math.abs(best[0][1] - best[1][1]) < 1e-6, len: bl } : null;
+  });
+
+  // ---- relation lines (square spokes, power lines)
+  const relations = [];
+  buildings.forEach((b) => {
+    if (b.special === 'square' || b.special === 'power' || b.special === 'water' || b.special === 'dyeworks') {
+      const imps = [...new Set(b.importers)].slice(0, 24);
+      relations.push({ from: b.id, to: imps, kind: b.special });
+    }
+  });
+
+  // ---- outside world: clearings
+  const extList = [...ext.entries()].map(([name, e]) => ({ name, n: e.n, byB: e.byB, declared: e.declared || null, build: !!e.build, std: !!e.std, lm: landmarkFor(name) }))
+    .filter((e) => e.n > 0 || e.declared === 'run' || e.build || e.lm)
+    .sort((a, b) => (b.n + (b.declared === 'run' ? 3 : 0) + (b.lm ? 2 : 0)) - (a.n + (a.declared === 'run' ? 3 : 0) + (a.lm ? 2 : 0)) || (a.name < b.name ? -1 : 1));
+  const maxClear = Math.min(10, extList.length);
+  const cx = W / 2, cy = H / 2;
+  const R = Math.hypot(W, H) / 2 + 3.2;
+  const clearings = extList.slice(0, maxClear).map((e) => {
+    let bestD = null, bestN = -1;
+    const perD = new Map(); for (const [bid, n] of e.byB) { const d = buildings[bid].district; perD.set(d, (perD.get(d) || 0) + n); }
+    for (const [d, n] of perD) if (n > bestN) { bestN = n; bestD = d; }
+    const D = bestD != null ? dById.get(bestD) : dOut.find((d) => d.civic) || dOut[0];
+    const ang = Math.atan2(D.y + D.h / 2 - cy, D.x + D.w / 2 - cx);
+    const dev = e.declared === 'dev' || e.build;
+    return { name: e.name, uses: e.n, kind: e.lm ? e.lm.key : null, label: e.lm ? e.lm.label : null, ang, r: 1.1 + 0.28 * Math.log2(1 + e.n), from: D.id, trail: dev && e.n === 0, std: e.std };
+  });
+  clearings.sort((a, b) => a.ang - b.ang);
+  for (let it = 0; it < 60; it++) {
+    let moved = false;
+    for (let i = 0; i < clearings.length; i++) {
+      const a = clearings[i], b = clearings[(i + 1) % clearings.length]; if (a === b) break;
+      let d = b.ang - a.ang; if (i === clearings.length - 1) d += Math.PI * 2;
+      const need = (a.r + b.r + 2.4) / R;
+      if (d < need) { const push = (need - d) / 2; a.ang -= push; b.ang += push; moved = true; }
+    }
+    if (!moved) break;
+  }
+  clearings.forEach((c) => {
+    c.x = cx + Math.cos(c.ang) * R; c.y = cy + Math.sin(c.ang) * R;
+    const D = dById.get(c.from);
+    // road starts at plot edge nearest the clearing, aligned with the source district
+    const sx = Math.max(-0.4, Math.min(W + 0.4, D.x + D.w / 2)), sy = Math.max(-0.4, Math.min(H + 0.4, D.y + D.h / 2));
+    let ex = sx, ey = sy;
+    const dx = c.x - cx, dy = c.y - cy;
+    if (Math.abs(dx) / W > Math.abs(dy) / H) ex = dx > 0 ? W + 0.4 : -0.4; else ey = dy > 0 ? H + 0.4 : -0.4;
+    c.road = { pts: [[ex, ey], [c.x, c.y]], dashed: c.trail };
+  });
+
+  // ---- history and people
+  const commits = scan.counts && scan.counts.commits != null ? scan.counts.commits : 1;
+  const rings = Math.max(1, Math.min(9, Math.round(Math.log2(commits + 1))));
+  const rnd = rng(hashStr(scan.owner + '/' + scan.repo));
+  const civicD = dOut.find((d) => d.civic);
+  const visitors = []; const vN = Math.min(24, scan.meta.stars || 0);
+  for (let i = 0; i < vN; i++) {
+    const t = rnd();
+    const side = Math.floor(rnd() * 4);
+    const x = side < 2 ? t * W : (side === 2 ? -0.3 : W + 0.3), y = side >= 2 ? t * H : (side === 0 ? -0.3 : H + 0.3);
+    visitors.push([x, y]);
+  }
+  const cranes = []; const nCr = Math.min(8, scan.meta.openIssues || 0);
+  const craneable = buildings.filter((b) => !['stake', 'fence', 'plaque', 'trash', 'hut', 'hutcluster'].includes(b.kind)).sort((a, b) => hashStr(a.path) - hashStr(b.path));
+  for (let i = 0; i < nCr && i < craneable.length; i++) cranes.push(craneable[i].id);
+
+  const minX = Math.min(-1.5, ...clearings.map((c) => c.x - c.r - 1.5)), maxX = Math.max(W + 1.5, ...clearings.map((c) => c.x + c.r + 1.5));
+  const minY = Math.min(-1.5, ...clearings.map((c) => c.y - c.r - 1.5)), maxY = Math.max(H + 1.5, ...clearings.map((c) => c.y + c.r + 1.5));
+
+  // ---- archetype (rule-based)
+  const archetype = classify({ districts: dOut, buildings, scan, edges, streets });
+
+  if (scan.sampled && scan.sampled.eligible > scan.sampled.read) notes.push(`Read ${scan.sampled.read} of ${scan.sampled.eligible} code files; streets reflect that sample.`);
+  if (scan.aggregated) notes.push(`Large repo: ${scan.treeCount.toLocaleString()} files grouped into folders.`);
+  if (scan.truncated) notes.push('GitHub truncated the file tree for this repo.');
+
+  return {
+    v: 1, mode: 'code', key: scan.owner + '/' + scan.repo, owner: scan.owner, repo: scan.repo,
+    W, H, bounds: { x0: minX, y0: minY, x1: maxX, y1: maxY },
+    districts: dOut, buildings: buildings.map(slimB), segs, streets: streets.map((s) => ({ name: s.name, traffic: s.traffic, target: s.target, label: s.label, routes: s.routes.map((r) => ({ from: r.from, n: r.n })) })),
+    relations, clearings, rings, visitors, cranes,
+    monuments: Math.min(6, (scan.counts && scan.counts.releases) || 0),
+    archived: scan.meta.archived, fork: scan.meta.fork, parent: scan.meta.parent,
+    stats: {
+      stars: scan.meta.stars, forks: scan.meta.forks, issues: scan.meta.openIssues, commits: scan.counts ? scan.counts.commits : null,
+      contributors: scan.counts ? scan.counts.contributors : null, releases: scan.counts ? scan.counts.releases : null,
+      files: scan.treeCount, lines: buildings.reduce((a, b) => a + b.lines, 0), imports: totalTraffic, stdlib: stdCount.n,
+      languages: scan.languages, created: scan.meta.created, description: scan.meta.description,
+    },
+    archetype, notes,
+  };
+}
+
+function slimB(b) {
+  return { id: b.id, name: b.name, path: b.path, x: b.x, y: b.y, w: b.w, d: b.d, h: b.h, lang: b.lang, kind: b.kind, special: b.special || null, landmark: b.landmark ? { key: b.landmark.key, label: b.landmark.label, lib: b.landmark.lib } : null, deco: b.deco, lines: b.lines, files: b.files, inDeg: b.inDeg, outDeg: b.outDeg, district: b.district, folder: !!b.folder, count: b.count || 0 };
+}
+
+function classify({ districts, buildings, scan, edges, streets }) {
+  const nonCivic = districts.filter((d) => !d.civic);
+  const huts = buildings.filter((b) => b.kind === 'hut').length;
+  const imgs = buildings.filter((b) => b.kind === 'gallery').length;
+  const langsUsed = Object.keys(scan.languages || {}).length;
+  const biggest = [...buildings].sort((a, b) => b.lines - a.lines)[0];
+  const totalLines = buildings.reduce((a, b) => a + b.lines, 0) || 1;
+  let core;
+  const lotsOnly = nonCivic.length && nonCivic.every((d) => (d.key || '').startsWith('::lot:'));
+  if (lotsOnly) core = nonCivic.length >= 4 ? 'Lot village' : 'Hamlet';
+  else if (!nonCivic.length && biggest && biggest.lines / totalLines > 0.7) core = 'Single-lot tower';
+  else if (!nonCivic.length && imgs >= 3) core = 'Gallery compound';
+  else if (!nonCivic.length) core = 'Hamlet';
+  else if (huts >= 20 && nonCivic.length >= 8) core = 'Colonial metropolis';
+  else if (nonCivic.length >= 8) core = 'Metropolis';
+  else if (nonCivic.length >= 3) core = nonCivic.length === 3 ? 'Three-district town' : 'Town';
+  else core = 'Village';
+  const traits = [];
+  const sq = buildings.find((b) => b.special === 'square'); if (sq) traits.push('downtown square');
+  const extN = new Set(); for (const b of buildings) if (b.landmark) extN.add(b.landmark.key);
+  if (edges.size === 0 && nonCivic.length) traits.push('no internal roads');
+  if (langsUsed >= 4) traits.push('multilingual');
+  if (scan.meta.archived) traits.push('ruins');
+  if (buildings.some((b) => b.kind === 'yard')) traits.push('walled');
+  return { name: core, traits };
+}
+
+/* ---------- list repos (awesome lists, tutorial indexes) ---------- */
+const LIST_LANGS = [
+  ['C', ['c', 'assembly', 'verilog', 'zig']], ['C++', ['c++']], ['Rust', ['rust']], ['Go', ['go']],
+  ['Java · C#', ['java', 'c#', 'f#', 'kotlin', 'scala', 'clojure']], ['Others', []], ['Ruby · PHP', ['ruby', 'php']],
+  ['JavaScript', ['javascript', 'node.js', 'typescript', 'js']], ['Python', ['python']],
+];
+function buildListTown(scan) {
+  const text = scan.readme || '';
+  const lines = text.split('\n');
+  const rows = []; let cur = null; let linkTotal = 0;
+  for (const l of lines) {
+    const h = l.match(/^#{2,4}\s+(.+?)\s*$/);
+    if (h) { cur = { title: h[1].replace(/[`*_]/g, '').replace(/^Build your own\s+/i, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').trim(), links: [] }; rows.push(cur); continue; }
+    if (!cur) continue;
+    const li = l.match(/^\s*[*\-+]\s+\[(.+?)\]\((\S+?)\)/);
+    if (!li) continue;
+    const label = li[1], url = li[2];
+    if (url.startsWith('#')) continue;
+    const lm = label.match(/^\*\*([^*]+)\*\*/);
+    linkTotal++;
+    cur.links.push({ lang: lm ? lm[1].trim() : null, url, label: label.replace(/\*\*[^*]+\*\*:?\s*/, '').replace(/[_*]/g, '').trim() });
+  }
+  let topics = rows.filter((r) => r.links.length >= 1);
+  if (linkTotal < 30 || topics.length < 3) return null;
+  const withLang = topics.reduce((a, r) => a + r.links.filter((x) => x.lang).length, 0);
+  const useLang = withLang / linkTotal > 0.4;
+  const domainCol = (u) => { const d = (u.match(/^https?:\/\/(?:www\.)?([^/]+)/) || [])[1] || 'other'; return d; };
+  let cols;
+  if (useLang) cols = LIST_LANGS.map((c) => c[0]);
+  else {
+    const dc = new Map(); topics.forEach((r) => r.links.forEach((x) => { const d = domainCol(x.url); dc.set(d, (dc.get(d) || 0) + 1); }));
+    cols = [...dc.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8).map((e) => e[0]); cols.push('Other sites');
+  }
+  const colOf = (x) => {
+    if (useLang) { const f = (x.lang || '').split('/')[0].trim().toLowerCase(); const i = LIST_LANGS.findIndex((c) => c[1].includes(f)); return i < 0 ? 5 : i; }
+    const d = domainCol(x.url); const i = cols.indexOf(d); return i < 0 ? cols.length - 1 : i;
+  };
+  const kindOf = (u) => (/youtube\.com|youtu\.be|vimeo\.com/.test(u) ? 'video' : /github\.com|gitlab\.com|bitbucket\.org|codeberg\.org/.test(u) ? 'repo' : 'article');
+  if (topics.length > 26) {
+    topics.sort((a, b) => b.links.length - a.links.length);
+    const keep = topics.slice(0, 25), small = topics.slice(25);
+    keep.push({ title: `${small.length} small topics`, links: small.flatMap((r) => r.links), merged: true });
+    topics = keep;
+  } else {
+    const small = topics.filter((r) => r.links.length <= 2);
+    if (small.length >= 4) { topics = topics.filter((r) => r.links.length > 2); topics.push({ title: `${small.length} small topics`, links: small.flatMap((r) => r.links), merged: true }); }
+  }
+  // order rows by their average column so the map shows patterns
+  topics.forEach((r) => { r.avg = r.links.reduce((a, x) => a + colOf(x), 0) / r.links.length; });
+  topics.sort((a, b) => a.avg - b.avg || (a.title < b.title ? -1 : 1));
+  const C = cols.length, Rn = topics.length;
+  const CW = 3.0, RH = 1.25;
+  const W = C * CW, H = Rn * RH;
+  const colTot = new Array(C).fill(0), rowTot = topics.map((r) => r.links.length);
+  const buildings = []; const fog = []; const cells = [];
+  topics.forEach((r, j) => {
+    const byCol = new Map(); r.links.forEach((x) => { const c = colOf(x); colTot[c]++; if (!byCol.has(c)) byCol.set(c, []); byCol.get(c).push(x); });
+    for (let i = 0; i < C; i++) {
+      const list = byCol.get(i) || [];
+      const x0 = i * CW + 0.35, y0 = j * RH + 0.3, w = CW - 0.45, h = RH - 0.4;
+      if (!list.length) { fog.push({ x: i * CW, y: j * RH, w: CW, h: RH }); continue; }
+      cells.push({ x: x0, y: y0, w, h });
+      const per = Math.max(1, Math.floor((w - 0.1) / 0.36));
+      list.sort((a, b) => ['video', 'repo', 'article'].indexOf(kindOf(a.url)) - ['video', 'repo', 'article'].indexOf(kindOf(b.url)));
+      list.forEach((x, k) => {
+        const bx = x0 + 0.08 + (k % per) * 0.36, by = y0 + 0.08 + Math.floor(k / per) * 0.36;
+        buildings.push({ id: buildings.length, name: x.label || x.url, path: x.url, x: bx, y: by, w: 0.28, d: 0.28, h: 0.28, lang: 'markdown', kind: 'link-' + kindOf(x.url), special: null, landmark: null, deco: {}, lines: 1, files: 1, inDeg: 0, outDeg: 0, district: j, topic: r.title, col: cols[i] });
+      });
+    }
+  });
+  const maxR = Math.max(...rowTot), maxC = Math.max(...colTot);
+  const suffix = (t) => (t >= maxR * 0.45 ? 'Blvd' : t >= maxR * 0.22 ? 'Ave' : 'St');
+  const rowsOut = topics.map((r, j) => ({ name: r.merged ? r.title : `${r.title} ${suffix(r.links.length)}`, y: j * RH, n: r.links.length, w: 0.08 + 0.28 * (r.links.length / maxR) }));
+  const colsOut = cols.map((c, i) => ({ name: c, x: i * CW, n: colTot[i], w: 0.08 + 0.3 * (colTot[i] / maxC) }));
+  const kinds = { article: 0, repo: 0, video: 0 }; buildings.forEach((b) => kinds[b.kind.slice(5)]++);
+  return {
+    v: 1, mode: 'list', key: scan.owner + '/' + scan.repo, owner: scan.owner, repo: scan.repo,
+    W, H, bounds: { x0: -1, y0: -1.2, x1: W + 1, y1: H + 2.6 },
+    grid: { CW, RH, rows: rowsOut, cols: colsOut, fog, cells, byLang: useLang },
+    districts: [], buildings, segs: [], streets: [], relations: [], clearings: [], rings: Math.max(1, Math.min(9, Math.round(Math.log2((scan.counts && scan.counts.commits || 1) + 1)))),
+    visitors: [], cranes: [], monuments: 0, archived: scan.meta.archived,
+    stats: { stars: scan.meta.stars, forks: scan.meta.forks, issues: scan.meta.openIssues, commits: scan.counts ? scan.counts.commits : null, contributors: scan.counts ? scan.counts.contributors : null, files: scan.treeCount, links: linkTotal, kinds, languages: scan.languages, created: scan.meta.created, description: scan.meta.description },
+    archetype: { name: 'Library grid', traits: [useLang ? 'topic streets × language avenues' : 'topic streets × site avenues'] }, notes: [],
+  };
+}
+
+/* ---- render.js ---- */
+/* GitHoods renderers: one town layout, two projections (street map and isometric). Canvas 2D. */
+
+const PAL = {
+  ink: '#5A3A22', inkSoft: '#8A6A44', parch: '#F3EAD7', block: '#EEE2C9', road: '#DCCBA8', roadEdge: '#B7A07A',
+  street: '#F8F0DE', streetCase: '#8A6A44', fog: '#D9D5CC', fogDot: '#B6AFA2', water: '#D6E3E1', gold: '#B8901E',
+  coral: '#E8735A', teal: '#5E9E8A', violet: '#8E6CC9', sand: '#E9B949', label: '#3B2A1A', labelSoft: '#6E5A44',
+};
+function shade(hex, k) { const h = hex.replace('#', ''); const r = [0, 2, 4].map((i) => Math.max(0, Math.min(255, Math.round(parseInt(h.slice(i, i + 2), 16) * k)))); return '#' + r.map((v) => v.toString(16).padStart(2, '0')).join(''); }
+function langColor(l) { return LANG_COLORS[l] || LANG_COLORS.other; }
+const KIND_LABEL = { library: 'Library (README)', plaque: 'Plaque (license)', fence: 'Fence (ignore file)', port: 'Port (deploy config)', customs: 'Customs house (dependency manifest)', warehouse: 'Warehouse (lockfile or data)', works: 'Works (CI workflows)', yard: 'Yard (tests)', gallery: 'Gallery (images)', concert: 'Concert hall (audio)', cinema: 'Cinema (video)', stake: 'Survey stake (empty file)', depot: 'Packing depot (build spec)', reading: 'Reading room (docs)', hall: 'Town hall (entry point)', house: 'Building', block: 'Block (folder)', hut: 'Hut (package)', hutcluster: 'Hut cluster', trash: 'Trash bin (build litter)', shed: 'Shed (tool config)', 'link-article': 'Article', 'link-repo': 'Code repo', 'link-video': 'Video' };
+const SPECIAL_LABEL = { square: 'Downtown square (most imported)', power: 'Power plant (shared config)', water: 'Water tower (shared utilities)', dyeworks: 'Dye works (shared theme)', gate: 'Gate (re-exports a district)' };
+
+function makeFogPattern(ctx) {
+  const c = document.createElement('canvas'); c.width = 8; c.height = 8;
+  const g = c.getContext('2d'); g.fillStyle = PAL.fog; g.fillRect(0, 0, 8, 8); g.fillStyle = PAL.fogDot; g.beginPath(); g.arc(2, 2, 0.8, 0, 7); g.arc(6, 6, 0.8, 0, 7); g.fill();
+  return ctx.createPattern(c, 'repeat');
+}
+
+class TownView {
+  constructor(canvas, onHover) {
+    this.cv = canvas; this.ctx = canvas.getContext('2d'); this.onHover = onHover || (() => {});
+    this.mode = 'plan'; this.town = null; this.cam = { x: 0, y: 0, z: 20 }; this.hover = null; this.pinned = null;
+    this.fog = makeFogPattern(this.ctx);
+    this._bind();
+    new ResizeObserver(() => this.resize()).observe(canvas);
+  }
+  setTown(t) { this.town = t; this.hover = null; this.pinned = null; this.fit(); }
+  setMode(m) { this.mode = m; this.fit(); }
+  resize() {
+    const r = this.cv.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1;
+    this.cv.width = Math.max(1, Math.round(r.width * dpr)); this.cv.height = Math.max(1, Math.round(r.height * dpr)); this.dpr = dpr;
+    if (!this._fitted) this.fit(); else this.draw();
+  }
+  // world -> view space (before camera)
+  P(x, y, z = 0) { return this.mode === 'plan' ? [x, y] : [(x - y) * 0.87, (x + y) * 0.5 - z]; }
+  S(x, y, z = 0) { const [vx, vy] = this.P(x, y, z); const c = this.cam; return [(vx - c.x) * c.z + this.cv.width / 2 / this.dpr, (vy - c.y) * c.z + this.cv.height / 2 / this.dpr]; }
+  fit() {
+    const t = this.town; if (!t) return;
+    const b = t.bounds; const pts = [[b.x0, b.y0], [b.x1, b.y0], [b.x1, b.y1], [b.x0, b.y1]].map(([x, y]) => this.P(x, y));
+    if (this.mode === 'iso') { const maxH = Math.max(1, ...t.buildings.map((q) => q.h || 0)) * 1.4; pts.push(...pts.map(([x, y]) => [x, y - maxH])); }
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+    const W = this.cv.width / (this.dpr || 1), H = this.cv.height / (this.dpr || 1);
+    this.cam = { x: (Math.max(...xs) + Math.min(...xs)) / 2, y: (Math.max(...ys) + Math.min(...ys)) / 2, z: Math.min(W / (w || 1), H / (h || 1)) * 0.96 };
+    this._fitted = true; this.draw();
+  }
+  _bind() {
+    const cv = this.cv; let drag = null; let moved = false; const pts = new Map(); let pinch = null;
+    cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.offsetX, e.offsetY]); drag = { x: e.offsetX, y: e.offsetY, cx: this.cam.x, cy: this.cam.y }; moved = false; if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), z: this.cam.z }; } });
+    cv.addEventListener('pointermove', (e) => {
+      if (pts.has(e.pointerId)) pts.set(e.pointerId, [e.offsetX, e.offsetY]);
+      if (pinch && pts.size === 2) { const [a, b] = [...pts.values()]; const d = Math.hypot(a[0] - b[0], a[1] - b[1]); this.cam.z = Math.max(2, Math.min(400, pinch.z * d / pinch.d)); moved = true; this.draw(); return; }
+      if (drag && pts.size === 1) { const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 3) moved = true; this.cam.x = drag.cx - dx / this.cam.z; this.cam.y = drag.cy - dy / this.cam.z; this.draw(); return; }
+      if (e.pointerType === 'mouse') this._hoverAt(e.offsetX, e.offsetY, false);
+    });
+    const up = (e) => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (drag && !moved) this._hoverAt(e.offsetX, e.offsetY, true); if (!pts.size) drag = null; };
+    cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+    cv.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const k = Math.exp(-e.deltaY * 0.0015); const W = this.cv.width / this.dpr, H = this.cv.height / this.dpr;
+      const wx = (e.offsetX - W / 2) / this.cam.z + this.cam.x, wy = (e.offsetY - H / 2) / this.cam.z + this.cam.y;
+      this.cam.z = Math.max(2, Math.min(400, this.cam.z * k));
+      this.cam.x = wx - (e.offsetX - W / 2) / this.cam.z; this.cam.y = wy - (e.offsetY - H / 2) / this.cam.z; this.draw();
+    }, { passive: false });
+    cv.addEventListener('dblclick', () => this.fit());
+  }
+  zoomBy(k) { this.cam.z = Math.max(2, Math.min(400, this.cam.z * k)); this.draw(); }
+
+  /* ---------- hit testing ---------- */
+  _hoverAt(sx, sy, click) {
+    const t = this.town; if (!t) return;
+    let hit = null;
+    if (this.mode === 'plan') {
+      const c = this.cam, W = this.cv.width / this.dpr, H = this.cv.height / this.dpr;
+      const x = (sx - W / 2) / c.z + c.x, y = (sy - H / 2) / c.z + c.y;
+      for (let i = t.buildings.length - 1; i >= 0; i--) { const b = t.buildings[i]; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.d) { hit = { type: 'building', b }; break; } }
+      if (!hit) for (const cl of t.clearings) if (Math.hypot(x - cl.x, y - cl.y) < cl.r * 1.3) { hit = { type: 'clearing', c: cl }; break; }
+      if (!hit && t.mode === 'code') for (const d of t.districts) if (x >= d.x && x <= d.x + d.w && y >= d.y && y <= d.y + d.h) { hit = { type: 'district', d }; break; }
+    } else {
+      const order = this._isoOrder || [];
+      for (let i = order.length - 1; i >= 0; i--) { const b = order[i]; if (this._inIsoBox(b, sx, sy)) { hit = { type: 'building', b }; break; } }
+      if (!hit) for (const cl of t.clearings) { const [px, py] = this.S(cl.x, cl.y); if (Math.hypot(sx - px, (sy - py) * 1.6) < cl.r * this.cam.z) { hit = { type: 'clearing', c: cl }; break; } }
+    }
+    if (click) this.pinned = hit;
+    this.hover = hit; this.draw(); this.onHover(this.pinned || hit, !!this.pinned);
+  }
+  _inIsoBox(b, sx, sy) {
+    const z = b.h * this._hz;
+    const poly = [this.S(b.x, b.y, z), this.S(b.x + b.w, b.y, z), this.S(b.x + b.w, b.y, 0), this.S(b.x + b.w, b.y + b.d, 0), this.S(b.x, b.y + b.d, 0), this.S(b.x, b.y + b.d, z)];
+    let inside = false;
+    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > sy) !== (yj > sy) && sx < ((xj - xi) * (sy - yi)) / (yj - yi) + xi) inside = !inside; }
+    return inside;
+  }
+
+  /* ---------- drawing ---------- */
+  draw() {
+    const t = this.town, ctx = this.ctx; if (!t || !this.dpr) return;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    const W = this.cv.width / this.dpr, H = this.cv.height / this.dpr;
+    ctx.fillStyle = PAL.fog; ctx.fillRect(0, 0, W, H);
+    ctx.save(); const [ox, oy] = this.S(0, 0); ctx.translate(ox % 8, oy % 8); ctx.fillStyle = this.fog; ctx.fillRect(-8, -8, W + 16, H + 16); ctx.restore();
+    if (t.mode === 'list') return this.mode === 'plan' ? this._drawListPlan(t) : this._drawListIso(t);
+    return this.mode === 'plan' ? this._drawPlan(t) : this._drawIso(t);
+  }
+  _poly(pts, fill, stroke, lw) { const c = this.ctx; c.beginPath(); pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); if (fill) { c.fillStyle = fill; c.fill(); } if (stroke) { c.strokeStyle = stroke; c.lineWidth = lw || 0.6; c.stroke(); } }
+  _rectW(x, y, w, h, z = 0) { return [this.S(x, y, z), this.S(x + w, y, z), this.S(x + w, y + h, z), this.S(x, y + h, z)]; }
+  _segPoly(a, b, w) { const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = (-dy / L) * w / 2, ny = (dx / L) * w / 2; const ex = (dx / L) * w / 2, ey = (dy / L) * w / 2; return [this.S(a[0] + nx - ex, a[1] + ny - ey), this.S(b[0] + nx + ex, b[1] + ny + ey), this.S(b[0] - nx + ex, b[1] - ny + ey), this.S(a[0] - nx - ex, a[1] - ny - ey)]; }
+  _circleW(x, y, r, n = 28) { const out = []; for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; out.push(this.S(x + Math.cos(a) * r, y + Math.sin(a) * r)); } return out; }
+  _text(s, x, y, o = {}) {
+    const c = this.ctx; c.font = `${o.w || 400} ${o.size || 11}px system-ui, -apple-system, "Segoe UI", sans-serif`; c.textAlign = o.align || 'center'; c.textBaseline = o.base || 'middle';
+    if (o.halo !== false) { c.lineWidth = 3; c.strokeStyle = o.haloColor || 'rgba(243,234,215,0.92)'; c.lineJoin = 'round'; c.strokeText(s, x, y); }
+    c.fillStyle = o.color || PAL.label; c.fillText(s, x, y);
+  }
+  _streetW(t) { return Math.min(0.9, 0.16 + 0.17 * Math.log2(1 + t)); }
+
+  _revealGround(t, iso) {
+    const pad = 0.7;
+    this._poly(this._rectW(-pad, -pad, t.W + 2 * pad, t.H + 2 * pad), PAL.parch, PAL.inkSoft, 0.8);
+    for (const c of t.clearings) {
+      this._strokeSeg(c.road.pts[0], c.road.pts[1], 1.1, PAL.parch);
+      this._poly(this._circleW(c.x, c.y, c.r * 0.95), PAL.parch, '#C9B79C', 0.6);
+    }
+  }
+  _drawRings(t) {
+    const c = this.ctx; c.save(); c.setLineDash([3, 3]); c.strokeStyle = PAL.inkSoft; c.lineWidth = 0.7;
+    const R0 = Math.hypot(t.W, t.H) / 2;
+    for (let i = 0; i < t.rings; i++) { const r = R0 * (0.62 + i * 0.07); this._poly(this._circleW(t.W / 2, t.H / 2, r, 64), null, PAL.inkSoft, 0.6); }
+    c.restore();
+  }
+  _drawRoadsBase(t) {
+    this._poly(this._rectW(-0.35, -0.35, t.W + 0.7, t.H + 0.7), PAL.road, PAL.roadEdge, 0.6);
+    for (const d of t.districts) this._poly(this._rectW(d.x, d.y, d.w, d.h), d.civic ? '#F1E6CF' : PAL.block, PAL.roadEdge, 0.6);
+  }
+  _strokeSeg(a, b, w, color, dash) {
+    const c = this.ctx; c.save(); c.strokeStyle = color; c.lineWidth = Math.max(1, w * this.cam.z * (this.mode === 'iso' ? 0.75 : 1)); c.lineCap = dash ? 'butt' : 'round'; if (dash) c.setLineDash(dash);
+    c.beginPath(); c.moveTo(...this.S(...a)); c.lineTo(...this.S(...b)); c.stroke(); c.restore();
+  }
+  _roadPts(c) { const [a, b] = c.road.pts; const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, k = Math.max(0, L - c.r * 0.62) / L; return [a, [a[0] + dx * k, a[1] + dy * k]]; }
+  _drawStreets(t) {
+    for (const s of t.segs) this._strokeSeg(s.a, s.b, this._streetW(s.t) + 0.14, PAL.streetCase);
+    for (const c of t.clearings) if (!c.road.dashed) this._strokeSeg(...this._roadPts(c), this._streetW(c.uses || 1) + 0.14, PAL.streetCase);
+    for (const s of t.segs) this._strokeSeg(s.a, s.b, this._streetW(s.t), PAL.street);
+    for (const c of t.clearings) {
+      const [a, b] = this._roadPts(c);
+      if (c.road.dashed) { const ctx = this.ctx; ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = PAL.ink; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(...this.S(...a)); ctx.lineTo(...this.S(...b)); ctx.stroke(); ctx.restore(); }
+      else this._strokeSeg(a, b, this._streetW(c.uses || 1), PAL.street);
+    }
+  }
+  _drawRelations(t) {
+    const ctx = this.ctx; const bs = t.buildings;
+    for (const r of t.relations) {
+      const f = bs[r.from]; const fc = [f.x + f.w / 2, f.y + f.d / 2];
+      ctx.save();
+      if (r.kind === 'power') { ctx.setLineDash([2, 3]); ctx.strokeStyle = PAL.gold; ctx.lineWidth = 0.9; }
+      else if (r.kind === 'water') { ctx.setLineDash([1, 3]); ctx.strokeStyle = '#6E9AA0'; ctx.lineWidth = 0.9; }
+      else if (r.kind === 'dyeworks') { ctx.setLineDash([1, 2]); ctx.strokeStyle = PAL.violet; ctx.lineWidth = 0.7; }
+      else { ctx.strokeStyle = PAL.ink; ctx.lineWidth = 0.5; ctx.globalAlpha = 0.6; }
+      for (const id of r.to) {
+        const b = bs[id]; const p = this.S(...fc), q = this.S(b.x + b.w / 2, b.y + b.d / 2);
+        ctx.beginPath(); ctx.moveTo(...p);
+        if (r.kind === 'square') ctx.lineTo(...q); else { const mx = (p[0] + q[0]) / 2, my = Math.min(p[1], q[1]) - 18; ctx.quadraticCurveTo(mx, my, ...q); }
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+  _bFill(b) {
+    if (b.kind === 'yard') return '#E4DED0';
+    if (b.kind === 'gallery') return '#F3EAD7';
+    if (b.kind === 'trash') return '#8A8170';
+    if (b.kind === 'library' || b.kind === 'reading') return '#F6E7B0';
+    if (b.kind === 'hall') return '#F6E7B0';
+    if (b.kind === 'plaque') return PAL.sand;
+    if (b.kind === 'customs') return '#EFE0B8';
+    if (b.kind === 'depot' || b.kind === 'port' || b.kind === 'shed' || b.kind === 'works') return '#E6D3B8';
+    return langColor(b.lang);
+  }
+  _drawPlanBuilding(b, hl) {
+    const ctx = this.ctx; const p = this._rectW(b.x, b.y, b.w, b.d); const [x0, y0] = p[0]; const [x1, y1] = p[2];
+    const w = x1 - x0, h = y1 - y0;
+    this._poly(p, this._bFill(b), hl ? PAL.coral : PAL.ink, hl ? 2 : 0.6);
+    if (w < 5) return;
+    ctx.save(); ctx.strokeStyle = PAL.ink; ctx.fillStyle = PAL.ink; ctx.lineWidth = 0.6;
+    const cx = x0 + w / 2, cy = y0 + h / 2, m = Math.min(w, h);
+    const k = b.landmark ? b.landmark.key : b.special || b.kind;
+    if (k === 'observatory') { ctx.beginPath(); ctx.arc(cx, cy, m * 0.33, 0, 7); ctx.stroke(); ctx.lineWidth = Math.max(1, m * 0.06); ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(cx + m * 0.24, cy - m * 0.24); ctx.stroke(); }
+    else if (k === 'theater') { for (const r of [0.15, 0.25, 0.35]) { ctx.beginPath(); ctx.arc(cx, cy - m * 0.1, m * r, 0, Math.PI); ctx.stroke(); } }
+    else if (k === 'exchange') { const n = b.deco.doors || 4; ctx.lineWidth = Math.max(1, w * 0.03); for (let i = 0; i < n; i++) { const x = x0 + w * (0.1 + 0.8 * (i + 0.5) / n); ctx.beginPath(); ctx.moveTo(x, y1); ctx.lineTo(x, y1 + Math.max(2, h * 0.08)); ctx.stroke(); } ctx.lineWidth = 0.4; for (let yy = y0 + 3; yy < y1; yy += 3) { ctx.beginPath(); ctx.moveTo(x0, yy); ctx.lineTo(x1, yy); ctx.stroke(); } }
+    else if (k === 'depot') { const s = m * 0.18; [[0.2, 0.2], [0.45, 0.2], [0.2, 0.45], [0.33, 0.33]].forEach(([u, v]) => ctx.strokeRect(x0 + w * u, y0 + h * v, s, s)); ctx.beginPath(); ctx.moveTo(x0 + w * 0.8, y0 + h * 0.8); ctx.lineTo(x0 + w * 0.3, y0 + h * 0.62); ctx.stroke(); ctx.beginPath(); ctx.arc(x0 + w * 0.8, y0 + h * 0.8, 1.5, 0, 7); ctx.fill(); }
+    else if (k === 'windowgate') { ctx.strokeRect(cx - m * 0.25, cy - m * 0.18, m * 0.5, m * 0.36); ctx.beginPath(); ctx.moveTo(cx, cy - m * 0.18); ctx.lineTo(cx, cy + m * 0.18); ctx.moveTo(cx - m * 0.25, cy); ctx.lineTo(cx + m * 0.25, cy); ctx.stroke(); }
+    else if (k === 'studio') { ctx.strokeRect(cx - m * 0.28, cy - m * 0.2, m * 0.56, m * 0.4); ctx.fillRect(cx - m * 0.28, cy - m * 0.2, m * 0.56, m * 0.08); }
+    else if (k === 'mill') { ctx.beginPath(); ctx.arc(cx, cy, m * 0.28, 0, 7); for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * m * 0.28, cy + Math.sin(a) * m * 0.28); } ctx.stroke(); }
+    else if (k === 'lab' || k === 'oracle') { ctx.beginPath(); ctx.moveTo(cx - m * 0.1, cy - m * 0.3); ctx.lineTo(cx - m * 0.1, cy - m * 0.05); ctx.lineTo(cx - m * 0.28, cy + m * 0.28); ctx.lineTo(cx + m * 0.28, cy + m * 0.28); ctx.lineTo(cx + m * 0.1, cy - m * 0.05); ctx.lineTo(cx + m * 0.1, cy - m * 0.3); ctx.stroke(); }
+    else if (k === 'vault') { ctx.beginPath(); ctx.ellipse(cx, cy - m * 0.15, m * 0.25, m * 0.09, 0, 0, 7); ctx.moveTo(cx - m * 0.25, cy - m * 0.15); ctx.lineTo(cx - m * 0.25, cy + m * 0.2); ctx.ellipse(cx, cy + m * 0.2, m * 0.25, m * 0.09, 0, Math.PI, 0, true); ctx.lineTo(cx + m * 0.25, cy - m * 0.15); ctx.stroke(); }
+    else if (k === 'mast' || k === 'automaton') { ctx.beginPath(); ctx.moveTo(cx, cy - m * 0.35); ctx.lineTo(cx, cy + m * 0.3); ctx.moveTo(cx - m * 0.2, cy + m * 0.3); ctx.lineTo(cx, cy - m * 0.1); ctx.lineTo(cx + m * 0.2, cy + m * 0.3); ctx.stroke(); }
+    else if (k === 'assay') { ctx.beginPath(); ctx.moveTo(cx - m * 0.3, cy); ctx.lineTo(cx + m * 0.3, cy); ctx.moveTo(cx, cy - m * 0.3); ctx.lineTo(cx, cy); ctx.stroke(); ctx.strokeRect(cx - m * 0.34, cy, m * 0.14, m * 0.1); ctx.strokeRect(cx + m * 0.2, cy, m * 0.14, m * 0.1); }
+    else if (k === 'square') { ctx.beginPath(); ctx.arc(cx, cy, m * 0.36, 0, 7); ctx.fillStyle = PAL.parch; ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.arc(cx, cy, m * 0.12, 0, 7); ctx.fillStyle = PAL.ink; ctx.fill(); }
+    else if (k === 'power') { [-0.15, 0.15].forEach((u) => { ctx.beginPath(); ctx.arc(cx + m * u, cy - m * 0.12, m * 0.11, 0, 7); ctx.fillStyle = PAL.parch; ctx.fill(); ctx.stroke(); }); }
+    else if (k === 'water') { ctx.beginPath(); ctx.arc(cx, cy, m * 0.22, 0, 7); ctx.fillStyle = PAL.water; ctx.fill(); ctx.stroke(); }
+    else if (k === 'dyeworks') { [[-0.18, 0.05, PAL.coral], [0, -0.1, PAL.sand], [0.18, 0.05, PAL.teal]].forEach(([u, v, col]) => { ctx.beginPath(); ctx.arc(cx + m * u, cy + m * v, m * 0.1, 0, 7); ctx.fillStyle = col; ctx.fill(); ctx.stroke(); }); }
+    else if (k === 'gate') { ctx.fillRect(x0 + w * 0.15, cy - m * 0.2, m * 0.12, m * 0.4); ctx.fillRect(x1 - w * 0.15 - m * 0.12, cy - m * 0.2, m * 0.12, m * 0.4); }
+    else if (k === 'library' || k === 'reading') { for (let i = 1; i <= 4; i++) { const yy = y0 + h * i / 5.5; ctx.beginPath(); ctx.moveTo(x0 + w * 0.15, yy); ctx.lineTo(x1 - w * 0.15, yy); ctx.stroke(); } }
+    else if (k === 'hall') { const r = m * 0.28; ctx.beginPath(); for (let i = 0; i < 10; i++) { const a = -Math.PI / 2 + i * Math.PI / 5, rr = i % 2 ? r * 0.45 : r; ctx.lineTo(cx + Math.cos(a) * rr, cy + Math.sin(a) * rr); } ctx.closePath(); ctx.fill(); }
+    else if (k === 'gallery') { ctx.strokeRect(x0 + w * 0.15, y0 + h * 0.2, w * 0.7, h * 0.6); ctx.globalAlpha = 0.5; ctx.fillStyle = PAL.coral; ctx.fillRect(x0 + w * 0.2, y0 + h * 0.25, w * 0.6, h * 0.5); }
+    else if (k === 'yard') { const s = Math.max(2, m / 6); ctx.globalAlpha = 0.35; for (let yy = y0, r = 0; yy < y1; yy += s, r++) for (let xx = x0 + (r % 2) * s; xx < x1; xx += 2 * s) ctx.fillRect(xx, yy, Math.min(s, x1 - xx), Math.min(s, y1 - yy)); }
+    else if (k === 'stake' || k === 'trash') { ctx.beginPath(); ctx.moveTo(x0 + w * 0.25, y0 + h * 0.25); ctx.lineTo(x1 - w * 0.25, y1 - h * 0.25); ctx.moveTo(x1 - w * 0.25, y0 + h * 0.25); ctx.lineTo(x0 + w * 0.25, y1 - h * 0.25); ctx.stroke(); }
+    else if (k === 'customs') { ctx.globalAlpha = 0.6; for (let yy = y0 + 2; yy < y1; yy += 3) for (let xx = x0 + 2; xx < x1; xx += 3) ctx.fillRect(xx, yy, 0.8, 0.8); }
+    else if (k === 'works') { ctx.beginPath(); ctx.arc(cx, cy, m * 0.22, 0, 7); ctx.stroke(); for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4; ctx.beginPath(); ctx.moveTo(cx + Math.cos(a) * m * 0.22, cy + Math.sin(a) * m * 0.22); ctx.lineTo(cx + Math.cos(a) * m * 0.3, cy + Math.sin(a) * m * 0.3); ctx.stroke(); } }
+    else if (k === 'block' || k === 'hutcluster') { ctx.globalAlpha = 0.5; ctx.lineWidth = 0.4; for (let yy = y0 + 3; yy < y1; yy += 3) { ctx.beginPath(); ctx.moveTo(x0, yy); ctx.lineTo(x1, yy); ctx.stroke(); } }
+    if (b.deco && b.deco.tiers && k !== 'observatory') { ctx.globalAlpha = 1; ctx.strokeStyle = '#6E8F8B'; const n = Math.min(b.deco.tiers, 10); for (let i = 1; i < n; i++) { const s = (i / n) * 0.42; ctx.strokeRect(x0 + w * s, y0 + h * s, w * (1 - 2 * s), h * (1 - 2 * s)); } }
+    if (b.deco && b.deco.screen && w > 10) { ctx.globalAlpha = 1; ctx.fillStyle = '#3E4A4A'; ctx.fillRect(x0 + w * 0.08, y0 + h * 0.08, Math.max(3, w * 0.22), Math.max(2, h * 0.14)); }
+    if (b.deco && b.deco.silo && w > 10) { ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(x1 - w * 0.14, y1 - h * 0.14, Math.max(1.5, m * 0.08), 0, 7); ctx.fillStyle = '#CFE3E0'; ctx.fill(); ctx.strokeStyle = PAL.ink; ctx.stroke(); }
+    ctx.restore();
+  }
+  _drawPlan(t) {
+    this._revealGround(t, false);
+    this._drawRings(t);
+    this._drawRoadsBase(t);
+    this._drawStreets(t);
+    const hl = this.pinned || this.hover;
+    for (const b of t.buildings) this._drawPlanBuilding(b, hl && hl.type === 'building' && hl.b.id === b.id);
+    this._drawRelations(t);
+    if (t.archived) { const c = this.ctx; c.save(); c.globalAlpha = 0.25; this._poly(this._rectW(-0.7, -0.7, t.W + 1.4, t.H + 1.4), '#9A9284'); c.restore(); }
+    this._drawClearings(t);
+    this._drawPeople(t);
+    this._drawLabels(t);
+  }
+  _drawClearings(t) {
+    const ctx = this.ctx;
+    for (const c of t.clearings) {
+      const [x, y] = this.S(c.x, c.y); const r = Math.max(5, c.r * 0.55 * this.cam.z);
+      ctx.save(); ctx.strokeStyle = PAL.ink; ctx.fillStyle = PAL.parch; ctx.lineWidth = 0.9;
+      if (this.mode === 'iso') { ctx.translate(x, y); ctx.scale(1, 0.62); ctx.translate(-x, -y); }
+      const k = c.kind;
+      if (k === 'observatory') { ctx.beginPath(); ctx.arc(x, y, r, Math.PI, 0); ctx.closePath(); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + r * 0.5, y - r * 0.7); ctx.lineWidth = 2; ctx.stroke(); }
+      else if (k === 'windowgate') { ctx.strokeRect(x - r, y - r * 0.7, r * 2, r * 1.4); ctx.beginPath(); ctx.moveTo(x, y - r * 0.7); ctx.lineTo(x, y + r * 0.7); ctx.moveTo(x - r, y); ctx.lineTo(x + r, y); ctx.stroke(); }
+      else if (k === 'depot') { ctx.strokeRect(x - r * 0.8, y - r * 0.8, r * 1.6, r * 1.6); ctx.beginPath(); ctx.moveTo(x - r * 0.8, y - r * 0.8); ctx.lineTo(x + r * 0.8, y + r * 0.8); ctx.stroke(); }
+      else if (k === 'theater') { for (const q of [0.5, 0.8, 1.1]) { ctx.beginPath(); ctx.arc(x, y - r * 0.2, r * q, 0, Math.PI); ctx.stroke(); } }
+      else if (k === 'exchange') { ctx.strokeRect(x - r, y - r * 0.6, r * 2, r * 1.2); for (let i = 0; i < 5; i++) { ctx.beginPath(); ctx.moveTo(x - r + r * 0.4 * (i + 0.5), y + r * 0.6); ctx.lineTo(x - r + r * 0.4 * (i + 0.5), y + r * 0.85); ctx.stroke(); } }
+      else { ctx.beginPath(); for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; ctx.lineTo(x + Math.cos(a) * r, y + Math.sin(a) * r); } ctx.closePath(); ctx.fill(); ctx.stroke(); if (k) { ctx.beginPath(); ctx.arc(x, y, r * 0.35, 0, 7); ctx.fillStyle = PAL.ink; ctx.fill(); } }
+      ctx.restore();
+      this._text(c.name, x, y + r + 10, { size: 11, color: PAL.ink });
+    }
+  }
+  _drawPeople(t) {
+    const ctx = this.ctx;
+    for (const [vx, vy] of t.visitors) { const [x, y] = this.S(vx, vy); ctx.fillStyle = PAL.coral; ctx.beginPath(); ctx.arc(x, y, Math.max(1.5, this.cam.z * 0.09), 0, 7); ctx.fill(); }
+    for (const id of t.cranes) { const b = t.buildings[id]; const [x, y] = this.S(b.x + b.w, b.y, this.mode === 'iso' ? b.h * this._hz : 0); ctx.save(); ctx.strokeStyle = PAL.coral; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - 12); ctx.lineTo(x - 10, y - 12); ctx.moveTo(x - 8, y - 12); ctx.lineTo(x - 8, y - 6); ctx.stroke(); ctx.restore(); }
+  }
+  _drawLabels(t) {
+    const z = this.cam.z, ctx = this.ctx;
+    ctx.font = '500 11px system-ui, sans-serif';
+    for (const d of t.districts) {
+      const txt = d.label; const tw = ctx.measureText(txt).width;
+      if (this.mode === 'plan') { if (d.w * z < tw + 6 || d.h * z < 14) continue; const [x, y] = this.S(d.x + 0.12, d.y + 0.08); this._text(txt, x + 2, y + 7, { align: 'left', w: 500, color: PAL.labelSoft }); }
+      else { if (d.w * z < 22) continue; const [x, y] = this.S(d.x + d.w / 2, d.y + d.h / 2, 0); this._text(txt, x, y - Math.min(60, (this._hz || 1) * 2 * z * 0.6), { w: 500, color: PAL.label }); }
+    }
+    const placed = [];
+    for (const s of t.streets) {
+      if (!s.label) continue;
+      const [x, y] = this.S(s.label.x, s.label.y); ctx.font = '500 11px system-ui, sans-serif'; const tw = ctx.measureText(s.name).width;
+      const lenPx = s.label.len * z * (this.mode === 'iso' ? 1 : 1);
+      if (lenPx < tw * 0.8) continue;
+      if (placed.some(([px, py]) => Math.abs(px - x) < tw && Math.abs(py - y) < 12)) continue;
+      placed.push([x, y]);
+      ctx.save(); ctx.translate(x, y);
+      if (this.mode === 'plan' && !s.label.horiz) ctx.rotate(-Math.PI / 2);
+      if (this.mode === 'iso') { const a = this.S(0, 0), b = s.label.horiz ? this.S(1, 0) : this.S(0, 1); ctx.rotate(Math.atan2(b[1] - a[1], b[0] - a[0])); }
+      this._text(s.name, 0, 0, { w: 500, color: '#2E2012', size: 11, haloColor: 'rgba(248,240,222,0.95)' });
+      ctx.restore();
+    }
+  }
+
+  /* ---------- isometric ---------- */
+  _drawIso(t) {
+    this._hz = 0.9;
+    this._revealGround(t, true);
+    this._drawRings(t);
+    this._drawRoadsBase(t);
+    this._drawStreets(t);
+    const order = [...t.buildings].sort((a, b) => (a.x + a.w + a.y + a.d) - (b.x + b.w + b.y + b.d) || a.id - b.id);
+    this._isoOrder = order;
+    const hl = this.pinned || this.hover;
+    for (const b of order) this._drawIsoBuilding(b, hl && hl.type === 'building' && hl.b.id === b.id);
+    this._drawClearings(t);
+    this._drawPeople(t);
+    this._drawLabels(t);
+  }
+  _drawIsoBuilding(b, hl) {
+    const ctx = this.ctx; const z = b.h * this._hz; const col = this._bFill(b);
+    const stroke = hl ? PAL.coral : PAL.ink, lw = hl ? 1.6 : 0.5;
+    const flat = ['stake', 'fence', 'plaque', 'trash'].includes(b.kind);
+    const H = flat ? 0.12 : z;
+    const left = [this.S(b.x, b.y + b.d, H), this.S(b.x + b.w, b.y + b.d, H), this.S(b.x + b.w, b.y + b.d, 0), this.S(b.x, b.y + b.d, 0)];
+    const right = [this.S(b.x + b.w, b.y, H), this.S(b.x + b.w, b.y + b.d, H), this.S(b.x + b.w, b.y + b.d, 0), this.S(b.x + b.w, b.y, 0)];
+    const top = this._rectW(b.x, b.y, b.w, b.d, H);
+    const k = b.landmark ? b.landmark.key : b.special || b.kind;
+    if (b.deco && b.deco.tiers > 1 && k !== 'observatory') {
+      const n = Math.min(b.deco.tiers, 10); const step = H / n;
+      for (let i = 0; i < n; i++) { const ins = (i / n) * 0.42 * b.w; const z0 = i * step, z1 = (i + 1) * step;
+        const L = [this.S(b.x + ins, b.y + b.d - ins, z1), this.S(b.x + b.w - ins, b.y + b.d - ins, z1), this.S(b.x + b.w - ins, b.y + b.d - ins, z0), this.S(b.x + ins, b.y + b.d - ins, z0)];
+        const R = [this.S(b.x + b.w - ins, b.y + ins, z1), this.S(b.x + b.w - ins, b.y + b.d - ins, z1), this.S(b.x + b.w - ins, b.y + b.d - ins, z0), this.S(b.x + b.w - ins, b.y + ins, z0)];
+        const c = i === 0 ? '#F2A08C' : col;
+        this._poly(L, shade(c, 0.93), stroke, lw); this._poly(R, shade(c, 0.8), stroke, lw); this._poly(this._rectW(b.x + ins, b.y + ins, b.w - 2 * ins, b.d - 2 * ins, z1), shade(c, 1.03), stroke, lw); }
+    } else {
+      this._poly(left, shade(col, 0.93), stroke, lw); this._poly(right, shade(col, 0.8), stroke, lw); this._poly(top, shade(col, 1.04), stroke, lw);
+    }
+    const [tx, ty] = this.S(b.x + b.w / 2, b.y + b.d / 2, H); const m = b.w * this.cam.z;
+    ctx.save(); ctx.strokeStyle = PAL.ink; ctx.lineWidth = 0.6;
+    if (k === 'observatory' || k === 'theater' || k === 'square') {
+      const r = m * 0.42; ctx.beginPath(); ctx.ellipse(tx, ty, r, r * 0.5, 0, 0, 7); ctx.fillStyle = PAL.parch; ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(tx, ty, r, Math.PI, 0); ctx.fillStyle = k === 'theater' ? '#C9E0DA' : '#E4F0EE'; ctx.fill(); ctx.stroke();
+      if (k === 'observatory') { ctx.lineWidth = Math.max(1.2, m * 0.06); ctx.beginPath(); ctx.moveTo(tx + r * 0.1, ty - r * 0.95); ctx.lineTo(tx + r * 0.25, ty - r * 0.2); ctx.stroke(); }
+    } else if (k === 'hall') { ctx.beginPath(); ctx.moveTo(tx - m * 0.35, ty); ctx.lineTo(tx + m * 0.35, ty); ctx.lineTo(tx, ty - m * 0.45); ctx.closePath(); ctx.fillStyle = '#C8643B'; ctx.fill(); ctx.stroke(); }
+    else if (k === 'power') { [-0.15, 0.15].forEach((u) => { ctx.fillStyle = '#F3EEE6'; ctx.fillRect(tx + m * u - 2, ty - m * 0.5, 4, m * 0.5); ctx.strokeRect(tx + m * u - 2, ty - m * 0.5, 4, m * 0.5); }); }
+    else if (k === 'water') { ctx.fillStyle = PAL.water; ctx.beginPath(); ctx.ellipse(tx, ty - m * 0.3, m * 0.22, m * 0.1, 0, 0, 7); ctx.fill(); ctx.stroke(); ctx.fillRect(tx - m * 0.22, ty - m * 0.3, m * 0.44, m * 0.25); ctx.strokeRect(tx - m * 0.22, ty - m * 0.3, m * 0.44, m * 0.25); }
+    else if (k === 'dyeworks') { [[-0.2, PAL.coral], [0, PAL.sand], [0.2, PAL.teal]].forEach(([u, c]) => { ctx.beginPath(); ctx.ellipse(tx + m * u, ty, m * 0.1, m * 0.05, 0, 0, 7); ctx.fillStyle = c; ctx.fill(); ctx.stroke(); }); }
+    else if (k === 'depot' || k === 'mast' || (b.deco && b.deco.mast)) { ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx, ty - m * 1.1); if (k === 'depot') ctx.lineTo(tx - m * 0.9, ty - m * 0.95); ctx.stroke(); }
+    else if (k === 'windowgate') { ctx.fillStyle = '#fff'; ctx.fillRect(tx - m * 0.25, ty - m * 0.45, m * 0.5, m * 0.35); ctx.strokeRect(tx - m * 0.25, ty - m * 0.45, m * 0.5, m * 0.35); }
+    if (k === 'exchange' && b.deco.doors) { const n = b.deco.doors; for (let i = 0; i < n; i++) { const u = 0.1 + 0.8 * (i + 0.5) / n; const p = this.S(b.x + b.w * u, b.y + b.d, H * 0.35), q = this.S(b.x + b.w * u, b.y + b.d, 0); ctx.strokeStyle = '#7A2E22'; ctx.lineWidth = Math.max(1, m * 0.04); ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q); ctx.stroke(); } }
+    if (b.deco && b.deco.screen && m > 8) { const s = this.S(b.x + b.w * 0.3, b.y + b.d * 0.3, H); ctx.fillStyle = '#3E4A4A'; ctx.fillRect(s[0] - m * 0.18, s[1] - m * 0.24, m * 0.36, m * 0.2); }
+    if (b.deco && b.deco.silo && m > 8) { const s = this.S(b.x + b.w + 0.25, b.y + b.d * 0.7, 0); const r = m * 0.12; ctx.fillStyle = '#CFE3E0'; ctx.fillRect(s[0] - r, s[1] - r * 3, r * 2, r * 3); ctx.strokeRect(s[0] - r, s[1] - r * 3, r * 2, r * 3); ctx.beginPath(); ctx.ellipse(s[0], s[1] - r * 3, r, r * 0.45, 0, 0, 7); ctx.fill(); ctx.stroke(); }
+    ctx.restore();
+  }
+
+  /* ---------- list towns ---------- */
+  _listColor(b) { return b.kind === 'link-video' ? PAL.coral : b.kind === 'link-repo' ? PAL.teal : '#E9D3A8'; }
+  _drawListPlan(t) {
+    const g = t.grid, ctx = this.ctx;
+    for (const c of g.cells) this._poly(this._rectW(c.x - 0.25, c.y - 0.2, c.w + 0.35, c.h + 0.3), PAL.parch);
+    for (const r of g.rows) this._poly(this._rectW(0, r.y, t.W, r.w), PAL.road);
+    for (const c of g.cols) this._poly(this._rectW(c.x, 0, c.w, t.H + 0.7), PAL.road);
+    for (const b of t.buildings) this._poly(this._rectW(b.x, b.y, b.w, b.d), this._listColor(b), PAL.ink, 0.35);
+    this._poly(this._rectW(0, t.H + 0.7, t.W, 1.1), '#F6E7B0', PAL.ink, 0.8);
+    const [lx, ly] = this.S(t.W / 2, t.H + 1.25); this._text('README library', lx, ly, { w: 500 });
+    const hl = this.pinned || this.hover; if (hl && hl.type === 'building') this._poly(this._rectW(hl.b.x, hl.b.y, hl.b.w, hl.b.d), null, PAL.coral, 2);
+    for (const r of g.rows) { const [x, y] = this.S(-0.2, r.y + g.RH / 2); this._text(r.name, x, y, { align: 'right', size: 11, w: r.n >= 30 ? 500 : 400 }); }
+    g.cols.forEach((c, i) => { const [x, y] = this.S(c.x + g.CW / 2, -0.25 - (i % 2) * 0.55); this._text(c.name, x, y, { w: 500, color: '#3E5E5A' }); });
+  }
+  _drawListIso(t) {
+    this._hz = 0.9;
+    const g = t.grid;
+    for (const c of g.cells) this._poly(this._rectW(c.x - 0.25, c.y - 0.2, c.w + 0.35, c.h + 0.3), '#EDE3D3');
+    for (const r of g.rows) this._poly(this._rectW(0, r.y, t.W, r.w), '#D6C3A0');
+    for (const c of g.cols) this._poly(this._rectW(c.x, 0, c.w, t.H + 0.7), '#D6C3A0');
+    const order = [...t.buildings].sort((a, b) => (a.x + a.y) - (b.x + b.y)); this._isoOrder = order;
+    const hl = this.pinned || this.hover;
+    for (const b of order) {
+      const col = this._listColor(b); const H = 0.35;
+      const lit = hl && hl.type === 'building' && hl.b.id === b.id;
+      this._poly([this.S(b.x, b.y + b.d, H), this.S(b.x + b.w, b.y + b.d, H), this.S(b.x + b.w, b.y + b.d, 0), this.S(b.x, b.y + b.d, 0)], shade(col, 0.92), lit ? PAL.coral : PAL.ink, 0.3);
+      this._poly([this.S(b.x + b.w, b.y, H), this.S(b.x + b.w, b.y + b.d, H), this.S(b.x + b.w, b.y + b.d, 0), this.S(b.x + b.w, b.y, 0)], shade(col, 0.8), lit ? PAL.coral : PAL.ink, 0.3);
+      this._poly(this._rectW(b.x, b.y, b.w, b.d, H), col, lit ? PAL.coral : PAL.ink, 0.3);
+      b.h = H / this._hz;
+    }
+    const lib = { x: 0, y: t.H + 0.7, w: t.W, d: 1.1, h: 2.2 };
+    this._poly([this.S(lib.x, lib.y + lib.d, lib.h), this.S(lib.x + lib.w, lib.y + lib.d, lib.h), this.S(lib.x + lib.w, lib.y + lib.d, 0), this.S(lib.x, lib.y + lib.d, 0)], '#E9D49A', PAL.ink);
+    this._poly([this.S(lib.x + lib.w, lib.y, lib.h), this.S(lib.x + lib.w, lib.y + lib.d, lib.h), this.S(lib.x + lib.w, lib.y + lib.d, 0), this.S(lib.x + lib.w, lib.y, 0)], '#CDB77C', PAL.ink);
+    this._poly(this._rectW(lib.x, lib.y, lib.w, lib.d, lib.h), '#FBEFC2', PAL.ink);
+    const [lx, ly] = this.S(t.W / 2, t.H + 1.25, lib.h + 1); this._text('README library', lx, ly, { w: 500 });
+    const z = this.cam.z;
+    g.rows.forEach((r) => { if (r.n < 20) return; const [x, y] = this.S(0, r.y + g.RH / 2); this._text(r.name, x - 6, y, { align: 'right', w: 500 }); });
+    g.cols.forEach((c) => { const [x, y] = this.S(c.x + g.CW / 2, -0.3); this._text(c.name, x + 4, y - 4, { align: 'left', w: 500, color: '#3E5E5A' }); });
+  }
+}
+
+/* ---- world.js ---- */
+/* GitHoods world: owners are nations, connected owners share an island, repos are plots granted in creation order. */
+
+/* ---------- model ---------- */
+function worldLinks(owners, towns) {
+  // Edges between owner logins, with the reason. Deterministic, data-only.
+  const byLower = new Map(Object.keys(owners).map((k) => [k.toLowerCase(), k]));
+  const repoOwner = new Map(); // repo name (lower) -> owner login, only when unique
+  for (const o of Object.values(owners)) for (const r of o.repos) { const k = r.name.toLowerCase(); repoOwner.set(k, repoOwner.has(k) && repoOwner.get(k) !== o.login ? null : o.login); }
+  const links = new Map();
+  const add = (a, b, why) => { if (!a || !b || a === b) return; const k = [a, b].sort().join('|'); if (!links.has(k)) links.set(k, { a: [a, b].sort()[0], b: [a, b].sort()[1], why: new Set() }); links.get(k).why.add(why); };
+  for (const t of Object.values(towns)) {
+    const me = byLower.get(t.owner.toLowerCase()); if (!me) continue;
+    if (t.parent) { const po = byLower.get(String(t.parent).split('/')[0].toLowerCase()); add(me, po, 'fork'); }
+    for (const c of t.clearings || []) {
+      const n = c.name.toLowerCase();
+      const scope = n.startsWith('@') ? n.slice(1).split('/')[0] : null;
+      if (scope && byLower.has(scope)) add(me, byLower.get(scope), 'package');
+      const bare = n.replace(/^@[^/]+\//, '');
+      const o = repoOwner.get(bare); if (o) add(me, o, 'import');
+    }
+  }
+  return [...links.values()].map((l) => ({ a: l.a, b: l.b, why: [...l.why] }));
+}
+
+function worldIslands(owners, links) {
+  const ids = Object.keys(owners).sort((a, b) => (owners[a].id || 9e15) - (owners[b].id || 9e15) || a.localeCompare(b));
+  const parent = new Map(ids.map((i) => [i, i]));
+  const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
+  for (const l of links) parent.set(find(l.a), find(l.b));
+  const groups = new Map();
+  for (const i of ids) { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); }
+  const islands = [...groups.values()].map((members) => {
+    const repos = members.reduce((a, m) => a + Math.max(1, owners[m].repos.length), 0);
+    const name = members.length === 1 ? members[0] + ' Isle' : members.slice().sort((a, b) => owners[b].repos.length - owners[a].repos.length)[0] + ' Archipelago';
+    return { id: members.slice().sort().join('+'), members, repos, name };
+  });
+  // Deterministic placement: shelf rows ordered by oldest member account id (no spiral).
+  islands.sort((a, b) => Math.min(...a.members.map((m) => owners[m].id || 9e15)) - Math.min(...b.members.map((m) => owners[m].id || 9e15)) || a.id.localeCompare(b.id));
+  const rOf = (isl) => 3 + 2.2 * Math.sqrt(isl.repos);
+  const rowW = Math.max(40, Math.sqrt(islands.reduce((a, i) => a + (2 * rOf(i) + 4) ** 2, 0)) * 1.25);
+  let x = 0, y = 0, rowH = 0;
+  for (const isl of islands) {
+    const r = rOf(isl), R = rng(hashStr(isl.id));
+    if (x + 2 * r > rowW && x > 0) { x = 0; y += rowH + 3; rowH = 0; }
+    isl.r = r; isl.cx = x + r + R() * 2; isl.cy = y + r + R() * 2;
+    const ph = [R() * 6.28, R() * 6.28, R() * 6.28];
+    isl.shape = Array.from({ length: 72 }, (_, k) => { const a = (k / 72) * Math.PI * 2; return 1.02 + 0.07 * Math.sin(2 * a + ph[0]) + 0.05 * Math.sin(3 * a + ph[1]) + 0.03 * Math.sin(5 * a + ph[2]); });
+    x += 2 * r + 4; rowH = Math.max(rowH, 2 * r + 2);
+  }
+  return islands;
+}
+
+function nationRects(isl, owners) {
+  // Treemap of member owners inside the island square, weighted by repo count.
+  const s = isl.r * 1.25;
+  const items = isl.members.map((m) => ({ v: Math.max(1, owners[m].repos.length), login: m })).sort((a, b) => b.v - a.v || a.login.localeCompare(b.login));
+  return squarify(items, isl.cx - s / 2, isl.cy - s / 2, s, s).map((it) => ({ login: it.login, x: it.rect.x, y: it.rect.y, w: it.rect.w, h: it.rect.h }));
+}
+
+function plotGrid(owner) {
+  const repos = owner.repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0) || a.name.localeCompare(b.name));
+  const n = Math.max(1, repos.length), cols = Math.ceil(Math.sqrt(n * 1.3));
+  return { cols, rows: Math.ceil(n / cols), plots: repos.map((r, i) => ({ repo: r, c: i % cols, r: Math.floor(i / cols), n: i + 1 })) };
+}
+
+/* ---------- view ---------- */
+class WorldView {
+  constructor(canvas, app) {
+    this.cv = canvas; this.ctx = canvas.getContext('2d'); this.app = app;
+    this.level = { kind: 'world' }; this.cam = { x: 0, y: 0, z: 10 }; this.hover = null;
+    this.fogPat = makeFogPattern(this.ctx);
+    this._bind(); new ResizeObserver(() => this.resize()).observe(canvas);
+  }
+  setData(owners, towns) { this.owners = owners; this.towns = towns; this.links = worldLinks(owners, towns); this.islands = worldIslands(owners, this.links); if (this.level.kind !== 'world' && !this._levelValid()) this.level = { kind: 'world' }; this.fit(); }
+  _levelValid() { if (this.level.kind === 'nation') return !!this.owners[this.level.login]; if (this.level.kind === 'island') return this.islands.some((i) => i.id === this.level.id); return true; }
+  go(level) { this.level = level; this.hover = null; this.fit(); this.app.onWorldLevel(level); }
+  islandOf(login) { return this.islands.find((i) => i.members.includes(login)); }
+  resize() { const r = this.cv.getBoundingClientRect(), d = window.devicePixelRatio || 1; this.cv.width = Math.max(1, Math.round(r.width * d)); this.cv.height = Math.max(1, Math.round(r.height * d)); this.dpr = d; this.fit(); }
+  _box() {
+    const L = this.level;
+    if (L.kind === 'world') { if (!this.islands.length) return [0, 0, 40, 30]; const xs = this.islands.flatMap((i) => [i.cx - i.r * 1.3, i.cx + i.r * 1.3]), ys = this.islands.flatMap((i) => [i.cy - i.r * 1.3, i.cy + i.r * 1.6]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; }
+    if (L.kind === 'island') { const i = this.islands.find((q) => q.id === L.id); return [i.cx - i.r * 1.25, i.cy - i.r * 1.25, i.cx + i.r * 1.25, i.cy + i.r * 1.35]; }
+    const g = plotGrid(this.owners[L.login]); return [-1.2, -2.6, g.cols * 4 + 0.2, g.rows * 4 + 0.6];
+  }
+  fit() {
+    if (!this.dpr || !this.owners) return;
+    const [x0, y0, x1, y1] = this._box(); const W = this.cv.width / this.dpr, H = this.cv.height / this.dpr;
+    this.cam = { x: (x0 + x1) / 2, y: (y0 + y1) / 2, z: Math.min(W / (x1 - x0), H / (y1 - y0)) * 0.95 }; this.draw();
+  }
+  S(x, y) { const c = this.cam; return [(x - c.x) * c.z + this.cv.width / this.dpr / 2, (y - c.y) * c.z + this.cv.height / this.dpr / 2]; }
+  U(sx, sy) { const c = this.cam; return [(sx - this.cv.width / this.dpr / 2) / c.z + c.x, (sy - this.cv.height / this.dpr / 2) / c.z + c.y]; }
+  _bind() {
+    const cv = this.cv; let drag = null, moved = false;
+    cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); drag = { x: e.offsetX, y: e.offsetY, cx: this.cam.x, cy: this.cam.y }; moved = false; });
+    cv.addEventListener('pointermove', (e) => {
+      if (drag) { const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 4) moved = true; if (moved) { this.cam.x = drag.cx - dx / this.cam.z; this.cam.y = drag.cy - dy / this.cam.z; this.draw(); } return; }
+      const h = this._hit(e.offsetX, e.offsetY); if (JSON.stringify(h) !== JSON.stringify(this.hover)) { this.hover = h; this.draw(); this.app.onWorldHover(h); }
+    });
+    cv.addEventListener('pointerup', (e) => { if (drag && !moved) this._click(this._hit(e.offsetX, e.offsetY)); drag = null; });
+    cv.addEventListener('wheel', (e) => { e.preventDefault(); const k = Math.exp(-e.deltaY * 0.0015); const [wx, wy] = this.U(e.offsetX, e.offsetY); this.cam.z = Math.max(0.5, Math.min(300, this.cam.z * k)); const [nx, ny] = this.U(e.offsetX, e.offsetY); this.cam.x += wx - nx; this.cam.y += wy - ny; this.draw(); }, { passive: false });
+  }
+  _hit(sx, sy) {
+    const [x, y] = this.U(sx, sy), L = this.level;
+    if (L.kind === 'world') { for (const i of this.islands) if (Math.hypot(x - i.cx, y - i.cy) < i.r * 1.05) { const n = nationRects(i, this.owners).find((q) => x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h); return { kind: 'island', id: i.id, login: n ? n.login : null }; } return null; }
+    if (L.kind === 'island') { const i = this.islands.find((q) => q.id === L.id); const n = nationRects(i, this.owners).find((q) => x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h); return n ? { kind: 'nation', login: n.login } : null; }
+    const g = plotGrid(this.owners[L.login]); const p = g.plots.find((q) => x >= q.c * 4 && x <= q.c * 4 + 3.4 && y >= q.r * 4 && y <= q.r * 4 + 3.4);
+    return p ? { kind: 'plot', login: L.login, repo: p.repo.name, n: p.n } : null;
+  }
+  _click(h) {
+    if (!h) return;
+    if (h.kind === 'island') { const isl = this.islands.find((i) => i.id === h.id); if (isl.members.length === 1) this.go({ kind: 'nation', login: isl.members[0] }); else this.go({ kind: 'island', id: h.id }); }
+    else if (h.kind === 'nation') this.go({ kind: 'nation', login: h.login });
+    else if (h.kind === 'plot') this.app.openRepo(h.login, h.repo);
+  }
+  zoomBy(k) { this.cam.z = Math.max(0.5, Math.min(300, this.cam.z * k)); this.draw(); }
+
+  /* ---------- drawing ---------- */
+  draw() {
+    const ctx = this.ctx; if (!this.dpr || !this.owners) return;
+    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    const W = this.cv.width / this.dpr, H = this.cv.height / this.dpr;
+    ctx.fillStyle = PAL.fog; ctx.fillRect(0, 0, W, H); ctx.fillStyle = this.fogPat; ctx.fillRect(0, 0, W, H);
+    if (!this.islands.length) { this._t('No owners charted yet. Scan a repo to reveal its owner.', W / 2, H / 2, { size: 13 }); return; }
+    if (this.level.kind === 'world') this._drawWorld(); else if (this.level.kind === 'island') this._drawIsland(); else this._drawNation();
+  }
+  _t(s, x, y, o = {}) { const c = this.ctx; c.font = `${o.w || 400} ${o.size || 11}px system-ui, -apple-system, sans-serif`; c.textAlign = o.align || 'center'; c.textBaseline = 'middle'; c.lineWidth = 3; c.strokeStyle = 'rgba(243,234,215,0.92)'; c.lineJoin = 'round'; c.strokeText(s, x, y); c.fillStyle = o.color || PAL.label; c.fillText(s, x, y); }
+  _islandPath(i, k = 1) {
+    const c = this.ctx; c.beginPath();
+    i.shape.forEach((s, j) => { const a = (j / i.shape.length) * Math.PI * 2; const [x, y] = this.S(i.cx + Math.cos(a) * i.r * s * k, i.cy + Math.sin(a) * i.r * s * k); j ? c.lineTo(x, y) : c.moveTo(x, y); });
+    c.closePath();
+  }
+  _drawWater(isls) {
+    const c = this.ctx;
+    for (const i of isls) { this._islandPath(i, 1.25); c.fillStyle = PAL.water; c.fill(); }
+    for (const i of isls) { this._islandPath(i, 1.1); c.fillStyle = '#E3ECE8'; c.fill(); }
+  }
+  _drawLinks(filter) {
+    const c = this.ctx; const centers = {};
+    for (const i of this.islands) for (const n of nationRects(i, this.owners)) centers[n.login] = [n.x + n.w / 2, n.y + n.h / 2];
+    for (const l of this.links) {
+      if (filter && !filter(l)) continue;
+      const a = centers[l.a], b = centers[l.b]; if (!a || !b) continue;
+      const p = this.S(...a), q = this.S(...b);
+      c.save(); c.strokeStyle = l.why.includes('fork') ? PAL.coral : PAL.ink; c.lineWidth = 1.6; if (!l.why.includes('import') && !l.why.includes('package')) c.setLineDash([5, 4]);
+      c.beginPath(); c.moveTo(...p); c.lineTo(...q); c.stroke(); c.restore();
+    }
+  }
+  _drawNationsOn(i, labels) {
+    const c = this.ctx; const rects = nationRects(i, this.owners);
+    this._islandPath(i); c.fillStyle = '#E9E1C9'; c.fill();
+    c.save(); this._islandPath(i); c.clip();
+    for (const n of rects) {
+      const o = this.owners[n.login]; const hov = this.hover && this.hover.login === n.login;
+      const p = [this.S(n.x, n.y), this.S(n.x + n.w, n.y + n.h)];
+      c.fillStyle = hov ? '#FBF3E2' : PAL.parch; c.fillRect(p[0][0], p[0][1], p[1][0] - p[0][0], p[1][1] - p[0][1]);
+      // land-grant plots inside each nation, scanned ones inked in
+      const g = plotGrid(o); const cw = n.w / g.cols, ch = n.h / Math.max(1, g.rows);
+      for (const pl of g.plots) {
+        const scanned = !!this.towns[(n.login + '/' + pl.repo.name).toLowerCase()];
+        const [x, y] = this.S(n.x + pl.c * cw + cw * 0.15, n.y + pl.r * ch + ch * 0.15);
+        const w = cw * 0.7 * this.cam.z, h = ch * 0.7 * this.cam.z;
+        c.fillStyle = scanned ? langColor(this.towns[(n.login + '/' + pl.repo.name).toLowerCase()].domLang || 'other') : '#E7DECB';
+        c.fillRect(x, y, w, h); if (scanned) { c.strokeStyle = PAL.ink; c.lineWidth = 0.8; c.strokeRect(x, y, w, h); }
+      }
+      c.strokeStyle = PAL.ink; c.lineWidth = o.type === 'Organization' ? 3 : 1; if (o.type !== 'Organization') c.setLineDash([4, 3]);
+      c.strokeRect(p[0][0], p[0][1], p[1][0] - p[0][0], p[1][1] - p[0][1]); c.setLineDash([]);
+    }
+    c.restore();
+    this._islandPath(i); c.strokeStyle = PAL.inkSoft; c.lineWidth = 1.2; c.stroke();
+    if (labels) for (const n of rects) { const [x, y] = this.S(n.x + n.w / 2, n.y + n.h / 2); if (n.w * this.cam.z > 50) this._t(n.login, x, y, { w: 600, size: 12 }); }
+  }
+  _drawWorld() {
+    this._drawWater(this.islands); this._drawLinks();
+    for (const i of this.islands) {
+      this._drawNationsOn(i, true);
+      const [x, y] = this.S(i.cx, i.cy + i.r * 1.32); this._t(i.name, x, y, { color: PAL.labelSoft, size: 11 });
+    }
+  }
+  _drawIsland() {
+    const i = this.islands.find((q) => q.id === this.level.id);
+    this._drawWater([i]); this._drawLinks((l) => i.members.includes(l.a) && i.members.includes(l.b));
+    this._drawNationsOn(i, true);
+    const [x, y] = this.S(i.cx, i.cy + i.r * 1.32); this._t(i.name, x, y, { color: PAL.labelSoft, size: 12, w: 600 });
+  }
+  _drawNation() {
+    const c = this.ctx, login = this.level.login, o = this.owners[login], g = plotGrid(o);
+    const [bx0, by0] = this.S(-0.6, -0.6), [bx1, by1] = this.S(g.cols * 4 - 0.0, g.rows * 4 - 0.0);
+    c.fillStyle = PAL.parch; c.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
+    c.strokeStyle = PAL.ink; c.lineWidth = o.type === 'Organization' ? 3 : 1.2; if (o.type !== 'Organization') c.setLineDash([5, 4]); c.strokeRect(bx0, by0, bx1 - bx0, by1 - by0); c.setLineDash([]);
+    const [tx, ty] = this.S((g.cols * 4 - 0.6) / 2, -1.6);
+    this._t(`${login} · ${o.type === 'Organization' ? 'organization (walled)' : 'user'} · ${o.repos.length} plot${o.repos.length === 1 ? '' : 's'}${o.created ? ' · charted ' + o.created.slice(0, 10) : ''}`, tx, ty, { w: 600, size: 13 });
+    for (const p of g.plots) {
+      const x = p.c * 4, y = p.r * 4, key = (login + '/' + p.repo.name).toLowerCase(), t = this.towns[key];
+      const [sx, sy] = this.S(x, y), s = 3.4 * this.cam.z; const hov = this.hover && this.hover.repo === p.repo.name;
+      if (t) {
+        c.fillStyle = '#FBF5E8'; c.fillRect(sx, sy, s, s);
+        this._miniTown(t, sx, sy, s);
+      } else {
+        c.fillStyle = this.fogPat; c.save(); c.translate(sx % 8, sy % 8); c.fillRect(sx - sx % 8, sy - sy % 8, s, s); c.restore();
+        if (s > 60) this._t(p.repo.size === 0 ? 'empty plot' : 'fogged · click to scan', sx + s / 2, sy + s / 2, { size: 10, color: PAL.labelSoft });
+      }
+      c.strokeStyle = hov ? PAL.coral : PAL.ink; c.lineWidth = hov ? 2.5 : 0.9; c.strokeRect(sx, sy, s, s);
+      if (s > 40) { this._t(`#${p.n}`, sx + 4, sy + 9, { align: 'left', size: 9, color: PAL.labelSoft }); this._t(p.repo.name, sx + s / 2, sy + s + 10, { size: s > 110 ? 12 : 10, w: 500 }); }
+    }
+  }
+  _miniTown(t, sx, sy, s) {
+    const c = this.ctx;
+    if (t.stub) { c.fillStyle = langColor(t.domLang || 'other'); c.fillRect(sx + s * 0.1, sy + s * 0.1, s * 0.8, s * 0.8); return; }
+    const k = (s * 0.86) / Math.max(t.W, t.H); const ox = sx + (s - t.W * k) / 2, oy = sy + (s - t.H * k) / 2;
+    c.fillStyle = PAL.road; c.fillRect(ox, oy, t.W * k, t.H * k);
+    if (t.mode === 'list') { for (const b of t.buildings) { c.fillStyle = b.kind === 'link-video' ? PAL.coral : b.kind === 'link-repo' ? PAL.teal : '#E9D3A8'; c.fillRect(ox + b.x * k, oy + b.y * k, Math.max(0.6, b.w * k), Math.max(0.6, b.d * k)); } return; }
+    for (const d of t.districts) { c.fillStyle = PAL.block; c.fillRect(ox + d.x * k, oy + d.y * k, d.w * k, d.h * k); }
+    for (const b of t.buildings) { c.fillStyle = langColor(b.lang); c.fillRect(ox + b.x * k, oy + b.y * k, Math.max(0.6, b.w * k), Math.max(0.6, b.d * k)); }
+    c.strokeStyle = PAL.streetCase; c.lineWidth = 0.8;
+    for (const sg of t.segs) { c.beginPath(); c.moveTo(ox + sg.a[0] * k, oy + sg.a[1] * k); c.lineTo(ox + sg.b[0] * k, oy + sg.b[1] * k); c.stroke(); }
+  }
+}
+
+/* ---- app.js ---- */
+/* GitHoods app shell: input, cache, tabs, panels. */
+(function () {
+  const $ = (s) => document.querySelector(s);
+  const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const fmt = (n) => (n == null ? '–' : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k' : String(n));
+  const STORE = 'githoods:v1';
+
+  /* ---------- state + cache ---------- */
+  const state = { owners: {}, towns: {}, current: null, tab: 'town', mode: 'plan' };
+  function domLang(t) { const L = {}; for (const b of t.buildings) if (b.lang && !['markdown', 'data', 'image', 'other'].includes(b.lang)) L[b.lang] = (L[b.lang] || 0) + (b.lines || 1); return Object.entries(L).sort((a, b) => b[1] - a[1])[0]?.[0] || (t.mode === 'list' ? 'markdown' : 'other'); }
+  function putTown(t) { t.domLang = t.domLang || domLang(t); t.builtAt = t.builtAt || Date.now(); state.towns[t.key.toLowerCase()] = t; }
+  function stubOf(e) { return { key: e.key, owner: e.owner, repo: e.repo, stub: true, public: true, file: e.file, mode: e.mode, parent: e.parent, clearings: (e.ext || []).map((name) => ({ name })), domLang: e.domLang, archetype: { name: e.archetype, traits: e.traits || [] }, builtAt: e.builtAt }; }
+  async function loadPublic() {
+    if (location.protocol === 'file:') return;
+    let ix;
+    try { const r = await fetch('towns/index.json', { cache: 'no-cache' }); if (!r.ok) return; ix = await r.json(); } catch (e) { return; }
+    state.publicIndex = ix;
+    for (const o of Object.values(ix.owners || {})) { const cur = state.owners[o.login]; if (!cur || (o.scannedAt || 0) >= (cur.scannedAt || 0)) state.owners[o.login] = o; }
+    for (const [k, e] of Object.entries(ix.towns || {})) {
+      const cur = state.towns[k];
+      if (cur && !cur.stub && (cur.builtAt || 0) >= (e.builtAt || 0)) { cur.public = true; continue; }
+      state.towns[k] = stubOf(e);
+    }
+  }
+  async function ensureTown(key) {
+    key = key.toLowerCase(); const t = state.towns[key];
+    if (!t || !t.stub) return t;
+    if (!t._loading) t._loading = fetch('towns/' + encodeURIComponent(t.file), { cache: 'no-cache' }).then((r) => { if (!r.ok) throw new Error('Could not load ' + t.key + ' from the public map.'); return r.json(); })
+      .then((full) => { full.public = true; putTown(full); return state.towns[key]; });
+    return t._loading;
+  }
+  function load() {
+    const seed = window.GH_SEED || { owners: {}, towns: {} };
+    for (const o of Object.values(seed.owners)) state.owners[o.login] = o;
+    for (const t of Object.values(seed.towns)) putTown(t);
+    try { const c = JSON.parse(localStorage.getItem(STORE) || 'null'); if (c) { Object.assign(state.owners, c.owners || {}); for (const t of Object.values(c.towns || {})) putTown(t); } } catch (e) { /* storage unavailable */ }
+  }
+  function save() {
+    const seedKeys = new Set(Object.keys((window.GH_SEED || {}).towns || {}).map((k) => k.toLowerCase()));
+    const towns = Object.fromEntries(Object.entries(state.towns).filter(([k, t]) => !seedKeys.has(k) && !t.stub && !t.public));
+    const owners = state.owners;
+    for (let tries = 0; tries < 6; tries++) {
+      try { localStorage.setItem(STORE, JSON.stringify({ owners, towns })); return; } catch (e) {
+        const oldest = Object.entries(towns).sort((a, b) => (a[1].builtAt || 0) - (b[1].builtAt || 0))[0]; if (!oldest) return; delete towns[oldest[0]];
+      }
+    }
+  }
+
+  /* ---------- views ---------- */
+  const townView = new TownView($('#town-canvas'), (hit, pinned) => renderInspector(hit, pinned));
+  const app = {
+    onWorldLevel: (lvl) => {
+      renderCrumbs(); renderWorldPanel(lvl);
+      if (lvl.kind === 'nation') { const o = state.owners[lvl.login]; Promise.all(o.repos.map((r) => ensureTown(o.login + '/' + r.name).catch(() => null))).then(() => worldView.draw()); }
+    },
+    onWorldHover: (h) => renderWorldHover(h),
+    openRepo: (login, repo) => openKey(login + '/' + repo, true),
+  };
+  const worldView = new WorldView($('#world-canvas'), app);
+
+  function setTab(tab) {
+    state.tab = tab;
+    document.body.dataset.tab = tab;
+    $('#tab-town').setAttribute('aria-selected', tab === 'town'); $('#tab-world').setAttribute('aria-selected', tab === 'world');
+    if (tab === 'world') { worldView.setData(state.owners, state.towns); renderCrumbs(); renderWorldPanel(worldView.level); }
+    else { townView.resize(); if (state.current) renderSummary(state.current); }
+  }
+  function setMode(m) { state.mode = m; $('#mode-plan').setAttribute('aria-pressed', m === 'plan'); $('#mode-iso').setAttribute('aria-pressed', m === 'iso'); townView.setMode(m); }
+  function showTown(t) {
+    state.current = t; setTab('town'); townView.setTown(t); renderSummary(t);
+    $('#q').value = t.key; history.replaceState(null, '', '#' + t.key);
+  }
+
+  async function openKey(key, scanIfMissing) {
+    if (!state.towns[key.toLowerCase()]) { if (scanIfMissing) run(key); return; }
+    progress('Loading ' + key + '…');
+    try { const t = await ensureTown(key); progress(''); $('#progress').className = ''; showTown(t); } catch (e) { progress(e.message, 'err'); }
+  }
+  // Where scan requests go: the repo that hosts this site.
+  function siteRepo() {
+    const h = location.hostname;
+    if (h.endsWith('.github.io')) { const owner = h.split('.')[0]; const seg = location.pathname.split('/').filter(Boolean)[0]; return owner + '/' + (seg && !seg.includes('.') ? seg : owner + '.github.io'); }
+    return window.GH_SITE_REPO || null;
+  }
+  function requestUrl(target) {
+    const r = siteRepo(); if (!r) return null;
+    return `https://github.com/${r}/issues/new?title=${encodeURIComponent('scan: ' + target)}&body=${encodeURIComponent('Requested from the GitHoods page. The bot builds the town and replies here.')}`;
+  }
+
+  /* ---------- scanning ---------- */
+  function parseQ(q) {
+    q = q.trim().replace(/^https?:\/\/(www\.)?github\.com\//i, '').replace(/\.git$/, '').replace(/[?#].*$/, '').replace(/\/+$/, '');
+    const parts = q.split('/').filter(Boolean); if (!parts.length || !/^[\w.-]+$/.test(parts[0])) return null;
+    return { owner: parts[0], repo: parts[1] && /^[\w.-]+$/.test(parts[1]) ? parts[1] : null };
+  }
+  let busy = false;
+  async function run(q) {
+    const p = parseQ(q); if (!p) return progress('Enter owner/repo, a GitHub link, or just an owner.', 'err');
+    if (busy) return; busy = true; $('#scan').disabled = true;
+    try {
+      if (!state.owners[p.owner] || !p.repo) {
+        const o = await scanOwner(p.owner, (m) => progress(m));
+        state.owners[o.login] = o; p.owner = o.login;
+      }
+      if (!p.repo) { save(); renderShelf(); progress(`Charted ${p.owner}: ${state.owners[p.owner].repos.length} plots.`, 'ok'); setTab('world'); worldView.go({ kind: 'nation', login: p.owner }); return; }
+      const scan = await scanRepo(p.owner, p.repo, (m) => progress(m));
+      progress('Laying out streets…');
+      await new Promise((r) => setTimeout(r, 0));
+      const t = buildTown(scan);
+      t.public = !!(state.publicIndex && state.publicIndex.towns[t.key.toLowerCase()]);
+      putTown(t);
+      const o = state.owners[scan.owner] || Object.values(state.owners).find((x) => x.login.toLowerCase() === scan.owner.toLowerCase());
+      if (o && !o.repos.some((r) => r.name.toLowerCase() === scan.repo.toLowerCase())) o.repos.push({ name: scan.repo, id: scan.id, created: scan.meta.created, size: scan.meta.size, lang: null, stars: scan.meta.stars });
+      save(); renderShelf(); showTown(t);
+      progress(`Built ${t.key}: ${t.archetype.name}.`, 'ok');
+    } catch (e) {
+      progress(e && e.message ? e.message : String(e), 'err'); console.error(e);
+    } finally { busy = false; $('#scan').disabled = false; }
+  }
+  let progT = null;
+  function progress(msg, cls) { const el = $('#progress'); el.textContent = msg; el.className = cls || 'busy'; clearTimeout(progT); if (cls === 'ok') progT = setTimeout(() => { el.textContent = ''; el.className = ''; }, 6000); }
+
+  /* ---------- panels ---------- */
+  function langBar(langs) {
+    const tot = Object.values(langs || {}).reduce((a, b) => a + b, 0); if (!tot) return '';
+    const items = Object.entries(langs).sort((a, b) => b[1] - a[1]).slice(0, 6);
+    const key = (n) => { const k = Object.keys(LANG_NAMES).find((x) => LANG_NAMES[x].toLowerCase() === n.toLowerCase()); return k || 'other'; };
+    return `<div class="langbar">${items.map(([n, v]) => `<span style="flex:${v};background:${langColor(key(n))}" title="${esc(n)} ${(100 * v / tot).toFixed(1)}%"></span>`).join('')}</div>
+      <div class="langkey">${items.map(([n, v]) => `<span><i style="background:${langColor(key(n))}"></i>${esc(n)} ${(100 * v / tot).toFixed(0)}%</span>`).join('')}</div>`;
+  }
+  function renderSummary(t) {
+    const s = t.stats || {}; const a = t.archetype || { name: '', traits: [] };
+    const stat = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
+    let html = `<h2><a href="https://github.com/${esc(t.key)}" target="_blank" rel="noopener">${esc(t.key)}</a></h2>
+      <p class="arch"><b>${esc(a.name)}</b>${a.traits && a.traits.length ? ' · ' + a.traits.map(esc).join(' · ') : ''}</p>
+      ${s.description ? `<p class="desc">${esc(s.description)}</p>` : ''}
+      <dl class="stats">${stat('Files', fmt(s.files))}${stat('Lines', fmt(s.lines))}${stat('Imports', fmt(s.imports))}${stat('Stars', fmt(s.stars))}${stat('Commits', fmt(s.commits))}${stat('Contributors', fmt(s.contributors))}</dl>
+      ${langBar(s.languages)}`;
+    const req = requestUrl(t.key);
+    html += t.public ? `<p class="pub">On the public map${t.builtAt ? ` · built ${new Date(t.builtAt).toISOString().slice(0, 10)}` : ''}</p>`
+      : req ? `<p class="pub local">Only in your browser. <a class="btn small" href="${esc(req)}" target="_blank" rel="noopener">Add to public map</a></p><p class="muted small">Opens a GitHub issue. The map bot rebuilds the town from GitHub and adds it for everyone.</p>` : `<p class="pub local">Only in your browser.</p>`;
+    if (t.mode === 'code') {
+      html += `<h3>Streets <small>named for the district they lead to, width = import traffic</small></h3><ul class="list">${t.streets.slice(0, 10).map((st) => `<li><span>${esc(st.name)}</span><b>${st.traffic}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
+        <h3>Outside the walls <small>external libraries, nearest the district that uses them</small></h3><ul class="list">${t.clearings.map((c) => `<li><span>${esc(c.name)}${c.label ? ` <em>${esc(c.label)}</em>` : ''}${c.trail ? ' <em>build trail</em>' : ''}</span><b>${c.uses}</b></li>`).join('') || '<li class="muted">None.</li>'}</ul>`;
+    } else {
+      html += `<h3>Grid</h3><p class="muted">Rows are topics and columns are languages. Each house is one link: coral for video, green for a code repo, sand for an article.</p>
+        <ul class="list">${t.grid.cols.slice(0, 12).map((c) => `<li><span>${esc(c.name)}</span><b>${c.n}</b></li>`).join('')}</ul>`;
+    }
+    html += `<h3>History</h3><p class="muted">${t.rings} ring${t.rings === 1 ? '' : 's'} of growth (commits), ${t.visitors.length} visitor${t.visitors.length === 1 ? '' : 's'} (stars), ${t.cranes.length} crane${t.cranes.length === 1 ? '' : 's'} (open issues)${s.created ? `, founded ${esc(s.created.slice(0, 10))}` : ''}.</p>`;
+    if (t.notes && t.notes.length) html += `<p class="note">${t.notes.map(esc).join('<br>')}</p>`;
+    $('#summary').innerHTML = html;
+    $('#inspector').innerHTML = '<p class="muted">Hover or tap a building, district or clearing.</p>';
+  }
+  function renderInspector(hit, pinned) {
+    const el = $('#inspector'); if (!hit) { el.innerHTML = '<p class="muted">Hover or tap a building, district or clearing.</p>'; return; }
+    const t = state.current; let h = '';
+    if (hit.type === 'building') {
+      const b = hit.b;
+      if (b.kind.startsWith('link-')) { h = `<h4>${esc(b.name)}</h4><p>${esc(KIND_LABEL[b.kind])} · ${esc(b.topic)} · ${esc(b.col)}</p><p><a href="${esc(b.path)}" target="_blank" rel="noopener">${esc(b.path.length > 60 ? b.path.slice(0, 60) + '…' : b.path)}</a></p>`; }
+      else {
+        const what = b.landmark ? `${b.landmark.label} (uses ${b.landmark.lib})` : b.special ? SPECIAL_LABEL[b.special] : KIND_LABEL[b.kind] || b.kind;
+        h = `<h4>${esc(b.name)}</h4><p class="path">${esc(b.path)}</p><p><b>${esc(what)}</b></p>
+          <dl class="stats small"><div><dt>Language</dt><dd>${esc(LANG_NAMES[b.lang] || b.lang || '–')}</dd></div><div><dt>${b.folder ? 'Files' : 'Lines'}</dt><dd>${fmt(b.folder ? b.files : b.lines)}</dd></div><div><dt>Imported by</dt><dd>${b.inDeg || 0}</dd></div><div><dt>Imports</dt><dd>${b.outDeg || 0}</dd></div></dl>`;
+        if (!b.folder && t) h += `<p><a href="https://github.com/${esc(t.key)}/blob/HEAD/${esc(b.path)}" target="_blank" rel="noopener">Open file on GitHub</a></p>`;
+      }
+    } else if (hit.type === 'district') {
+      const d = hit.d; h = `<h4>${esc(d.label)}</h4><p class="path">${esc(d.key || '/')}</p><dl class="stats small"><div><dt>Buildings</dt><dd>${d.bcount}</dd></div><div><dt>Files</dt><dd>${fmt(d.files)}</dd></div><div><dt>Lines</dt><dd>${fmt(d.lines)}</dd></div><div><dt>Main language</dt><dd>${esc(LANG_NAMES[d.lang] || d.lang || '–')}</dd></div></dl>`;
+    } else if (hit.type === 'clearing') {
+      const c = hit.c; h = `<h4>${esc(c.name)}</h4><p><b>${c.label ? esc(c.label) : 'Outside library'}</b>${c.std ? ' · standard library' : ''}${c.trail ? ' · build or dev only' : ''}</p><p>${c.uses} import${c.uses === 1 ? '' : 's'} from this town.</p>`;
+    }
+    el.innerHTML = h + (pinned ? '<p class="muted">Pinned. Tap empty ground to release.</p>' : '');
+  }
+  function renderCrumbs() {
+    const L = worldView.level, el = $('#crumbs'); const parts = [`<button data-go="world">World</button>`];
+    if (L.kind === 'island') parts.push(`<span>${esc(worldView.islands.find((i) => i.id === L.id)?.name || '')}</span>`);
+    if (L.kind === 'nation') { const isl = worldView.islandOf(L.login); if (isl && isl.members.length > 1) parts.push(`<button data-go="island:${esc(isl.id)}">${esc(isl.name)}</button>`); parts.push(`<span>${esc(L.login)}</span>`); }
+    el.innerHTML = parts.join('<i>›</i>');
+  }
+  function renderWorldPanel(L) {
+    const owners = Object.values(state.owners); const links = worldView.links || [];
+    let h;
+    if (L.kind === 'nation') {
+      const o = state.owners[L.login]; const scanned = o.repos.filter((r) => state.towns[(o.login + '/' + r.name).toLowerCase()]).length;
+      const ls = links.filter((l) => l.a === o.login || l.b === o.login);
+      h = `<h2><a href="https://github.com/${esc(o.login)}" target="_blank" rel="noopener">${esc(o.login)}</a></h2><p class="arch"><b>${o.type === 'Organization' ? 'Walled nation (organization)' : 'Nation (user)'}</b></p>
+        <dl class="stats"><div><dt>Plots</dt><dd>${o.repos.length}</dd></div><div><dt>Towns built</dt><dd>${scanned}</dd></div><div><dt>Stars</dt><dd>${fmt(o.repos.reduce((a, r) => a + (r.stars || 0), 0))}</dd></div></dl>
+        <p class="muted">Plots are granted left to right in the order the repos were created. Fogged plots have not been scanned; tap one to build its town.</p>
+        <h3>Plots</h3><ul class="list">${o.repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0)).map((r, i) => `<li><button class="link" data-open="${esc(o.login)}/${esc(r.name)}">#${i + 1} ${esc(r.name)}</button><b>${state.towns[(o.login + '/' + r.name).toLowerCase()] ? 'town' : r.fork ? 'fork' : ''}</b></li>`).join('')}</ul>
+        ${ls.length ? `<h3>Infrastructure</h3><ul class="list">${ls.map((l) => `<li><span>${esc(l.a === o.login ? l.b : l.a)}</span><b>${esc(l.why.join(', '))}</b></li>`).join('')}</ul>` : ''}`;
+    } else {
+      h = `<h2>The world</h2><p class="muted">Each owner is a nation. Owners linked by forks or imports share an island; unlinked owners sit on their own isle. Inside each nation, small squares are repo plots in creation order, inked once a town is built. Everything not yet scanned stays in fog.</p>
+        <dl class="stats"><div><dt>Nations</dt><dd>${owners.length}</dd></div><div><dt>Islands</dt><dd>${(worldView.islands || []).length}</dd></div><div><dt>Towns</dt><dd>${Object.keys(state.towns).length}</dd></div></dl>
+        <h3>Recently built</h3><ul class="list">${Object.values(state.towns).sort((a, b) => (b.builtAt || 0) - (a.builtAt || 0)).slice(0, 12).map((t) => `<li><button class="link" data-town="${esc(t.key.toLowerCase())}">${esc(t.key)}</button><b>${esc(t.archetype ? t.archetype.name : '')}</b></li>`).join('')}</ul>
+        <h3>Nations</h3><ul class="list">${owners.map((o) => `<li><button class="link" data-nation="${esc(o.login)}">${esc(o.login)}</button><b>${o.repos.length}</b></li>`).join('')}</ul>
+        ${links.length ? `<h3>Infrastructure</h3><ul class="list">${links.map((l) => `<li><span>${esc(l.a)} ↔ ${esc(l.b)}</span><b>${esc(l.why.join(', '))}</b></li>`).join('')}</ul>` : ''}`;
+    }
+    $('#summary').innerHTML = h; $('#inspector').innerHTML = '<p class="muted">Hover an island, nation or plot.</p>';
+  }
+  function renderWorldHover(hh) {
+    const el = $('#inspector'); if (!hh) { el.innerHTML = '<p class="muted">Hover an island, nation or plot.</p>'; return; }
+    if (hh.kind === 'plot') { const o = state.owners[hh.login]; const r = o.repos.find((x) => x.name === hh.repo); const t = state.towns[(hh.login + '/' + hh.repo).toLowerCase()];
+      el.innerHTML = `<h4>${esc(hh.repo)}</h4><p>Plot #${hh.n}${r.created ? ' · granted ' + esc(r.created.slice(0, 10)) : ''}</p><p>${t ? `<b>${esc(t.archetype.name)}</b>` : r.size === 0 ? 'Empty plot' : 'Fogged. Tap to scan and build.'}</p>${r.lang ? `<p class="muted">${esc(r.lang)}${r.stars ? ' · ' + fmt(r.stars) + ' stars' : ''}</p>` : ''}`; }
+    else { const login = hh.login; const o = login && state.owners[login]; el.innerHTML = o ? `<h4>${esc(login)}</h4><p>${o.type === 'Organization' ? 'Organization' : 'User'} · ${o.repos.length} plots</p>` : ''; }
+  }
+
+  /* ---------- wiring ---------- */
+  $('#form').addEventListener('submit', (e) => { e.preventDefault(); run($('#q').value); });
+  $('#tab-town').onclick = () => setTab('town'); $('#tab-world').onclick = () => setTab('world');
+  $('#mode-plan').onclick = () => setMode('plan'); $('#mode-iso').onclick = () => setMode('iso');
+  $('#zin').onclick = () => (state.tab === 'town' ? townView : worldView).zoomBy(1.4);
+  $('#zout').onclick = () => (state.tab === 'town' ? townView : worldView).zoomBy(1 / 1.4);
+  $('#zfit').onclick = () => (state.tab === 'town' ? townView : worldView).fit();
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('[data-go],[data-open],[data-nation],[data-town]'); if (!b) return;
+    if (b.dataset.go === 'world') worldView.go({ kind: 'world' });
+    else if (b.dataset.go) worldView.go({ kind: 'island', id: b.dataset.go.slice(7) });
+    else if (b.dataset.nation) worldView.go({ kind: 'nation', login: b.dataset.nation });
+    else if (b.dataset.open) { const [o, r] = b.dataset.open.split('/'); app.openRepo(o, r); }
+    else if (b.dataset.town) openKey(b.dataset.town, false);
+  });
+  const dlg = $('#settings');
+  $('#gear').onclick = () => { let tok = ''; try { tok = localStorage.getItem('gh_token') || ''; } catch (e) {} $('#token').value = tok; dlg.showModal(); };
+  $('#save-token').onclick = () => { try { const v = $('#token').value.trim(); v ? localStorage.setItem('gh_token', v) : localStorage.removeItem('gh_token'); } catch (e) {} };
+  $('#clear-cache').onclick = () => { try { localStorage.removeItem(STORE); } catch (e) {} state.towns = {}; state.owners = {}; load(); loadPublic().then(renderShelf); progress('Cleared towns saved in this browser. Public map towns remain.', 'ok'); };
+  function renderShelf() {
+    const ts = Object.values(state.towns).sort((a, b) => (b.builtAt || 0) - (a.builtAt || 0));
+    $('#shelf-count').textContent = `${ts.length} town${ts.length === 1 ? '' : 's'}`;
+    $('#shelf').innerHTML = ts.slice(0, 80).map((t) => `<button data-town="${esc(t.key.toLowerCase())}"${t.public ? '' : ' class="mine" title="Only in your browser"'}>${esc(t.key)}</button>`).join('');
+  }
+
+  load(); renderShelf(); setMode('plan');
+  (async () => {
+    await loadPublic(); renderShelf();
+    const hash = decodeURIComponent(location.hash.slice(1));
+    if (hash) { if (state.towns[hash.toLowerCase()]) openKey(hash); else { setTab('town'); run(hash); } }
+    else if (Object.keys(state.towns).length) setTab('world');
+    else setTab('world');
+  })();
+  window.GitHoods = { state, townView, worldView, run, showTown, setTab, setMode, openKey, ensureTown };
+})();
+
+</script>
+</body>
+</html>

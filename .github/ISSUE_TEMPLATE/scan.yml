@@ -1,0 +1,7 @@
+name: Add to the map
+description: Ask the GitHoods bot to build a town for a public repo
+title: "scan: owner/repo"
+body:
+  - type: markdown
+    attributes:
+      value: "Edit the title to the repo you want built, like `scan: Beachkila/bang`. Use `scan: owner` to chart an owner's plots. Up to 5, separated by spaces. Public repos only."

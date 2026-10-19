@@ -1,0 +1,20 @@
+name: Relay scan request
+# Passes "scan:" issues to the private bot. Only the issue number is sent; the bot reads the issue itself.
+on:
+  issues:
+    types: [opened, labeled]
+permissions: {}
+jobs:
+  relay:
+    if: startsWith(github.event.issue.title, 'scan:') || startsWith(github.event.issue.title, 'Scan:')
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Send to GitHoods-private
+        env:
+          GH_TOKEN: ${{ secrets.PRIVATE_DISPATCH_TOKEN }}
+          NUM: ${{ github.event.issue.number }}
+          ACTION: ${{ github.event.action }}
+        run: |
+          gh api "repos/${{ github.repository_owner }}/GitHoods-private/dispatches" \
+            -f event_type=scan-request -F "client_payload[issue]=$NUM" -f "client_payload[action]=$ACTION"
