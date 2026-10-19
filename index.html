@@ -1593,21 +1593,22 @@ class TownView {
 
 /* ---------- model ---------- */
 function worldLinks(owners, towns) {
-  // Edges between owner logins, with the reason. Deterministic, data-only.
+  // Edges between owner logins, with the reason. Only exact connections count:
+  //   fork     the repo was forked from the other owner's repo
+  //   package  an import scoped to the other owner, like @owner/thing
+  //   github   an import or dependency that names github.com/owner/repo directly
+  // Bare package names are never matched to repo names; "cli" or "core" would join unrelated owners.
   const byLower = new Map(Object.keys(owners).map((k) => [k.toLowerCase(), k]));
-  const repoOwner = new Map(); // repo name (lower) -> owner login, only when unique
-  for (const o of Object.values(owners)) for (const r of o.repos) { const k = r.name.toLowerCase(); repoOwner.set(k, repoOwner.has(k) && repoOwner.get(k) !== o.login ? null : o.login); }
   const links = new Map();
-  const add = (a, b, why) => { if (!a || !b || a === b) return; const k = [a, b].sort().join('|'); if (!links.has(k)) links.set(k, { a: [a, b].sort()[0], b: [a, b].sort()[1], why: new Set() }); links.get(k).why.add(why); };
+  const add = (a, b, why) => { if (!a || !b || a === b) return; const [x, y] = [a, b].sort(); const k = x + '|' + y; if (!links.has(k)) links.set(k, { a: x, b: y, why: new Set() }); links.get(k).why.add(why); };
   for (const t of Object.values(towns)) {
     const me = byLower.get(t.owner.toLowerCase()); if (!me) continue;
-    if (t.parent) { const po = byLower.get(String(t.parent).split('/')[0].toLowerCase()); add(me, po, 'fork'); }
+    if (t.parent) add(me, byLower.get(String(t.parent).split('/')[0].toLowerCase()), 'fork');
     for (const c of t.clearings || []) {
-      const n = c.name.toLowerCase();
-      const scope = n.startsWith('@') ? n.slice(1).split('/')[0] : null;
-      if (scope && byLower.has(scope)) add(me, byLower.get(scope), 'package');
-      const bare = n.replace(/^@[^/]+\//, '');
-      const o = repoOwner.get(bare); if (o) add(me, o, 'import');
+      const n = String(c.name).toLowerCase();
+      if (n.startsWith('@')) { const scope = n.slice(1).split('/')[0]; if (byLower.has(scope)) add(me, byLower.get(scope), 'package'); }
+      const gh = n.match(/(?:^|\/\/|github:)(?:github\.com\/)?([a-z0-9-]+)\/[\w.-]+/);
+      if (/github\.com\/|^github:/.test(n) && gh && byLower.has(gh[1])) add(me, byLower.get(gh[1]), 'github');
     }
   }
   return [...links.values()].map((l) => ({ a: l.a, b: l.b, why: [...l.why] }));
