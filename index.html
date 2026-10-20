@@ -2398,9 +2398,9 @@ class Town3D {
   /* ---- labels that follow the model ---- */
   _staticLabels() {
     const t = this.town; this._static = [];
-    const add = (text, x, y, z, cls) => { const el = document.createElement('div'); el.className = 'l3 ' + (cls || ''); el.textContent = text; this.labels.appendChild(el); this._static.push({ el, v: new THREE.Vector3(x, z, y) }); };
+    const add = (text, x, y, z, cls) => { const el = document.createElement('div'); el.className = 'l3 ' + (cls || ''); el.textContent = text; this.labels.appendChild(el); const L = { el, v: new THREE.Vector3(x, z, y) }; this._static.push(L); return L; };
     if (t.mode === 'list') { for (const r of t.grid.rows) if (r.n >= 6) add(r.name, -0.4, r.y + t.grid.RH / 2, 0.1, 'street end'); t.grid.cols.forEach((c) => add(c.name, c.x + t.grid.CW / 2, -0.8, 0.1, 'district')); add('README library', t.W / 2, t.H + 1.25, 2.1, 'district'); return; }
-    for (const c of t.clearings) { if (t.hex) { const dx = t.hex.x - c.x, dy = t.hex.y - c.y, k = 1.5 / (Math.hypot(dx, dy) || 1); add(c.name, c.x + dx * k, c.y + dy * k, 0.05, 'lib'); } else add(c.name, c.x, c.y + c.r + 0.6, 0.05, 'lib'); }
+    for (const c of t.clearings) { if (t.hex) { const dx = t.hex.x - c.x, dy = t.hex.y - c.y, k = 1.5 / (Math.hypot(dx, dy) || 1); add(c.name, c.x + dx * k, c.y + dy * k, 0.05, 'lib').cl = c; } else add(c.name, c.x, c.y + c.r + 0.6, 0.05, 'lib').cl = c; }
     for (const s of t.streets || []) if (s.name && !s.empty && s.path && s.path.length > 3) { const p = s.path[Math.floor(s.path.length / 2)]; add(s.name, p[0] + 0.5, p[1] + 0.5, 0.05, 'street'); }
   }
   _refreshDynamicLabels() { this._dyn = true; }
@@ -2409,12 +2409,18 @@ class Town3D {
     const W = this.renderer.domElement.clientWidth, H = this.renderer.domElement.clientHeight;
     const ppu = H / (this.cam.top - this.cam.bottom) * this.cam.zoom;
     const v = new THREE.Vector3(); const proj = (p) => { v.copy(p).project(this.cam); return [(v.x * 0.5 + 0.5) * W, (-v.y * 0.5 + 0.5) * H, v.x >= -1.05 && v.x <= 1.05 && v.y >= -1.05 && v.y <= 1.05]; };
+    // lit wires: only the selected file and the files / gates on the far end of its wires keep a name
+    const selB = this.pinned || this.hover; let focus = null, focusLibs = null;
+    if (selB && selB.type === 'building' && t.v >= 4 && this._wires) {
+      const id = selB.b.id; focus = new Set([id]); focusLibs = new Set();
+      for (const w of this._wires) { if (w.a !== id && w.c !== id) continue; if (w.lib) { for (const cl of t.clearings) if ((cl.users || []).includes(id)) focusLibs.add(cl); } else focus.add(w.a === id ? w.c : w.a); }
+    }
     const taken = [];
     const free = (x, y, w, h) => !taken.some((r) => Math.abs(r[0] - x) < (r[2] + w) / 2 + 4 && Math.abs(r[1] - y) < (r[3] + h) / 2 + 2);
     for (const L of this._static) {
       const [x, y, on] = proj(L.v); const isStreet = L.el.classList.contains('street');
       const w = L.el.offsetWidth || L.el.textContent.length * 7, h = 14;
-      const show = on && (!isStreet || ppu > 16) && free(x, y, w, h);
+      const show = on && (!isStreet || ppu > 16) && (!focusLibs || !L.cl || focusLibs.has(L.cl)) && free(x, y, w, h);
       L.el.hidden = !show; if (show) { L.el.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`; taken.push([x, y, w, h]); }
     }
     // file names: lit ones always; others when there is room on screen for them
@@ -2441,7 +2447,7 @@ class Town3D {
       }
     }
     const want = [];
-    for (const b of t.buildings) { const B = this._bs[b.id]; if (!B) continue; const hot = lit.has(b.id); const px = Math.max(b.w || 0.3, b.d || 0.3) * ppu; if (!hot && (this.matches.length || px < 18)) continue; want.push({ b, B, hot, px, rt: onRoute.has(b.id) ? 1 : 0, imp: ((t._in && t._in.get(b.id)) || []).length }); }
+    for (const b of t.buildings) { const B = this._bs[b.id]; if (!B) continue; const hot = lit.has(b.id) || (focus && focus.has(b.id)); if (focus && !focus.has(b.id)) continue; const px = Math.max(b.w || 0.3, b.d || 0.3) * ppu; if (!hot && (this.matches.length || px < 18)) continue; want.push({ b, B, hot, px, rt: onRoute.has(b.id) ? 1 : 0, imp: ((t._in && t._in.get(b.id)) || []).length }); }
     want.sort((a, c) => (c.hot - a.hot) || (c.rt - a.rt) || (c.imp - a.imp) || (c.b.lines || 0) - (a.b.lines || 0));
     const stops = new Map((this._routeStops || []).map((s) => [s.b.id, s.i]));
     let used = 0, shown = 0;
@@ -2454,15 +2460,15 @@ class Town3D {
       const strong = it.hot || it.rt;
       if (!strong && shown >= cap) break;
       const g = this._grp.get(it.b.id); let text, at = it.b, top = it.B.box.max.y + 0.1;
-      if (g && !it.hot) {
+      if (g && !it.hot && !focus) {
         if (doneGrp.has(g)) continue; doneGrp.add(g);
         const cx0 = g.list.reduce((a, b) => a + b.x, 0) / g.n, cy0 = g.list.reduce((a, b) => a + b.y, 0) / g.n;
         text = (g.e === 'mp4' || g.e === 'mov' || g.e === 'webm' ? 'Video' : /^(ttf|otf|woff2?)$/.test(g.e) ? 'Fonts' : /^(mp3|wav|ogg)$/.test(g.e) ? 'Audio' : g.e === 'pdf' ? 'PDFs' : 'Images') + ' · ' + g.n + ' files'; at = { x: cx0, y: cy0 };
       } else {
         const key = it.b.district + '|' + this._short.get(it.b.id);
-        if (seen.has(key) && !it.hot) continue; seen.add(key);
+        if (seen.has(key) && !it.hot && !focus) continue; seen.add(key);
         const same = t.buildings.filter((o) => o.district === it.b.district && this._short.get(o.id) === this._short.get(it.b.id)).length;
-        text = this._short.get(it.b.id) + (same > 1 ? ' ×' + same : '');
+        text = this._short.get(it.b.id) + (same > 1 && !focus ? ' ×' + same : '');
       }
       const [x, y0, on] = proj(new THREE.Vector3(at.x, top, at.y)); if (!on) continue;
       const w = text.length * 6.3 + 14, h = 19;
