@@ -39,7 +39,7 @@ canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;displa
 #world-canvas{display:none} body[data-tab="world"] #world-canvas{display:block} body[data-tab="world"] #town-canvas{display:none}
 .zoom{position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:4px}
 .zoom button{width:34px;height:34px;border-radius:8px;border:1px solid #CDBB98;background:#FBF6EC;color:#3B2A1A;font-size:16px}
-aside{border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:14px 16px 24px}
+aside{border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:14px 16px 24px;min-width:0}
 aside h2{font-size:17px;margin:0 0 4px;word-break:break-word} aside h2 a{color:inherit}
 aside h3{font-size:13px;margin:16px 0 6px;text-transform:uppercase;letter-spacing:.4px;color:var(--soft)}
 aside h3 small{text-transform:none;letter-spacing:0;font-weight:400;display:block}
@@ -74,7 +74,7 @@ dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);c
 dialog input{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--input);color:var(--ink);font:inherit}
 dialog menu{display:flex;gap:8px;justify-content:flex-end;padding:0;margin:12px 0 0;flex-wrap:wrap}
 @media (max-width:820px){
-  main{grid-template-columns:1fr;grid-template-rows:62vh auto}
+  main{grid-template-columns:minmax(0,1fr);grid-template-rows:62vh auto}
   aside{border-left:0;border-top:1px solid var(--line);overflow:visible}
   body{height:auto;min-height:100%} html{height:auto}
 }
@@ -912,173 +912,190 @@ function buildTown(scan) {
     };
   });
 
-  // ---- layout
-  const sideOf = (b) => {
-    if (b.kind === 'hut') return 0.55 + 0.06 * Math.log10(1 + b.lines);
-    if (b.kind === 'hutcluster') return 0.9;
-    if (['stake', 'fence', 'plaque', 'trash'].includes(b.kind)) return 0.5;
-    return 0.75 + 0.5 * Math.log10(1 + b.lines);
-  };
-  buildings.forEach((b) => { b.side = sideOf(b); b.h = b.kind === 'hut' ? 0.5 + 0.15 * Math.log10(1 + b.lines) : 0.35 + 0.7 * Math.log10(1 + b.lines); });
-  const dItems = districts.map((g) => {
-    const bs = buildings.filter((b) => b.district === g.id);
-    const area = bs.reduce((a, b) => a + (b.side + 0.3) ** 2, 0) * 1.25 + 2;
-    return { g, bs, v: area };
-  }).sort((a, b) => b.v - a.v || (a.g.key < b.g.key ? -1 : 1));
-  const A = dItems.reduce((a, d) => a + d.v, 0);
-  const GUT = 1.0;
-  const W = Math.sqrt(A * 1.3) + GUT * Math.sqrt(districts.length), H = (A / Math.sqrt(A * 1.3)) + GUT * Math.sqrt(districts.length);
-  const tm = squarify(dItems, 0, 0, W, H);
-  const dOut = [];
-  for (const it of tm) {
-    const r = { x: it.rect.x + GUT / 2, y: it.rect.y + GUT / 2, w: Math.max(0.6, it.rect.w - GUT), h: Math.max(0.6, it.rect.h - GUT) };
-    const inner = { x: r.x + 0.25, y: r.y + 0.55, w: Math.max(0.3, r.w - 0.5), h: Math.max(0.3, r.h - 0.75) };
-    const bs = it.bs.sort((a, b) => (b.landmark ? 1 : 0) - (a.landmark ? 1 : 0) || b.side - a.side || (a.name < b.name ? -1 : 1));
-    packShelves(bs, inner, 0.22);
-    const langs = new Map(); bs.forEach((b) => langs.set(b.lang, (langs.get(b.lang) || 0) + b.lines));
-    const top = [...langs.entries()].sort((a, b) => b[1] - a[1])[0];
-    dOut.push({ id: it.g.id, key: it.g.key, label: it.g.label, civic: !!it.g.civic, outskirts: it.g.outskirts || null, x: r.x, y: r.y, w: r.w, h: r.h, lang: top ? top[0] : 'other', lines: bs.reduce((a, b) => a + b.lines, 0), files: bs.reduce((a, b) => a + b.files, 0), bcount: bs.length });
-  }
-  const dById = new Map(dOut.map((d) => [d.id, d]));
+  // ---- layout: the town grows from its code (deterministic, seeded by the repo name)
+  const rnd = rng(hashStr(scan.owner + '/' + scan.repo));
+  const mean = (a) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
+  const sdev = (a) => { const m = mean(a); return Math.sqrt(mean(a.map((x) => (x - m) ** 2))); };
+  // orderliness: even folder depths and even file sizes make a planned grid; uneven ones an old town
+  const fileBs = buildings.filter((b) => !b.folder && b.files === 1);
+  const depths = fileBs.map((b) => b.path.split('/').length - 1);
+  const logL = buildings.map((b) => Math.log10(1 + b.lines));
+  const order = Math.max(0, Math.min(1, 1 - 0.9 * sdev(depths) - 0.6 * (sdev(logL) / (mean(logL) || 1))));
+  const planned = order > 0.6;
 
-  // ---- district traffic + routed streets
+  // footprints: area from lines; many short functions make a wide low building, few long ones a narrow tall one
+  for (const b of buildings) {
+    const m = b.m || {};
+    const fns = (m.fns || 0) + (m.classes || 0);
+    let area, aspect = 1;
+    if (b.kind === 'hut') area = 0.3 + 0.08 * Math.log10(1 + b.lines);
+    else if (b.kind === 'hutcluster') area = 0.8;
+    else if (['stake', 'fence', 'plaque', 'trash'].includes(b.kind)) area = 0.25;
+    else area = 0.35 + 0.5 * Math.log10(1 + b.lines);
+    const perFn = fns ? b.lines / fns : b.lines;
+    if (fns && b.files === 1) aspect = Math.max(0.55, Math.min(2.2, (30 / Math.max(8, perFn)) * 1.1));
+    b.w = Math.sqrt(area * aspect); b.d = Math.sqrt(area / aspect);
+    b.h = b.kind === 'hut' ? 0.45 + 0.15 * Math.log10(1 + b.lines) : 0.3 + (perFn > 60 ? 0.85 : 0.55) * Math.log10(1 + b.lines);
+    b.r = Math.hypot(b.w, b.d) / 2 + 0.3;
+  }
+
+  // districts: the busiest-imported one settles in the middle
   const dEdges = new Map();
   for (const [k, n] of edges) { const [a, c] = k.split('>').map(Number); const da = buildings[a].district, dc = buildings[c].district; if (da === dc) continue; const kk = da + '>' + dc; dEdges.set(kk, (dEdges.get(kk) || 0) + n); }
   const inbound = new Map(); for (const [k, n] of dEdges) { const t = +k.split('>')[1]; inbound.set(t, (inbound.get(t) || 0) + n); }
   const totalTraffic = [...dEdges.values()].reduce((a, b) => a + b, 0);
-  const CELL = Math.max(0.2, Math.min(0.5, Math.max(W, H) / 140));
-  const gx = Math.ceil((W + 2) / CELL), gy = Math.ceil((H + 2) / CELL);
-  const ox = -1, oy = -1;
-  const blocked = new Uint8Array(gx * gy);
-  for (const d of dOut) {
-    const x0 = Math.floor((d.x - ox) / CELL), x1 = Math.ceil((d.x + d.w - ox) / CELL), y0 = Math.floor((d.y - oy) / CELL), y1 = Math.ceil((d.y + d.h - oy) / CELL);
-    for (let y = Math.max(0, y0); y < Math.min(gy, y1); y++) for (let x = Math.max(0, x0); x < Math.min(gx, x1); x++) blocked[y * gx + x] = 1;
+  const dOrder = districts.map((g) => g.id).sort((a, b) => (inbound.get(b) || 0) - (inbound.get(a) || 0) || a - b);
+  const nD = dOrder.length;
+  const spread = 2 + Math.sqrt(buildings.length) * 0.9;
+  const dHome = new Map(dOrder.map((id, i) => { if (i === 0 && nD > 1 && (inbound.get(id) || 0) > 0) return [id, [0, 0]]; const a = (i / nD) * Math.PI * 2 + 0.3; return [id, [Math.cos(a) * spread, Math.sin(a) * spread]]; }));
+  for (const b of buildings) { const [hx, hy] = dHome.get(b.district); const a = rnd() * Math.PI * 2, rr = rnd() * 1.5 + 0.2; b.x = hx + Math.cos(a) * rr; b.y = hy + Math.sin(a) * rr; b.vx = 0; b.vy = 0; }
+
+  // neighbour grid so big towns stay fast
+  const maxR = Math.max(...buildings.map((b) => b.r));
+  const near = (fn) => {
+    const cell = 2 * maxR + 2.4, grid = new Map();
+    buildings.forEach((b, i) => { const k = Math.floor(b.x / cell) + ',' + Math.floor(b.y / cell); if (!grid.has(k)) grid.set(k, []); grid.get(k).push(i); });
+    for (let i = 0; i < buildings.length; i++) {
+      const A = buildings[i]; const cx0 = Math.floor(A.x / cell), cy0 = Math.floor(A.y / cell);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) { const list = grid.get((cx0 + dx) + ',' + (cy0 + dy)); if (list) for (const j of list) if (j > i) fn(A, buildings[j]); }
+    }
+  };
+  const edgeList = [...edges.entries()].map(([k, n]) => { const [a, c] = k.split('>').map(Number); return [buildings[a], buildings[c], n]; });
+  const maxIn = Math.max(1, ...buildings.map((b) => b.inDeg));
+  const N1 = buildings.length > 300 ? 200 : buildings.length > 120 ? 420 : 700;
+  const sep = (A, B, gapSame, gapOther, k) => { const dx = B.x - A.x, dy = B.y - A.y, d = Math.hypot(dx, dy) || 0.01; const want = A.r + B.r + (A.district === B.district ? gapSame : gapOther); if (d < want) { const f = (want - d) * k; A.vx -= dx / d * f; A.vy -= dy / d * f; B.vx += dx / d * f; B.vy += dy / d * f; } };
+  for (let it = 0; it < N1; it++) {
+    const cool = 1 - it / N1;
+    const cen = new Map(); for (const b of buildings) { const c = cen.get(b.district) || [0, 0, 0]; c[0] += b.x; c[1] += b.y; c[2]++; cen.set(b.district, c); }
+    for (const b of buildings) {
+      const pull = 0.004 + 0.02 * (b.inDeg / maxIn) + (b.kind === 'hall' || b.kind === 'library' ? 0.01 : 0);
+      b.vx -= b.x * pull; b.vy -= b.y * pull;
+      const c = cen.get(b.district); b.vx += (c[0] / c[2] - b.x) * 0.05; b.vy += (c[1] / c[2] - b.y) * 0.05;
+    }
+    for (const [A, B] of edgeList) { const dx = B.x - A.x, dy = B.y - A.y, d = Math.hypot(dx, dy) || 0.01, f = (d - (A.r + B.r) * 1.15) * (A.district === B.district ? 0.01 : 0.002); A.vx += dx / d * f; A.vy += dy / d * f; B.vx -= dx / d * f; B.vy -= dy / d * f; }
+    near((A, B) => sep(A, B, 0.2, 2.2, 0.25));
+    for (const b of buildings) { b.x += b.vx * cool; b.y += b.vy * cool; b.vx *= 0.6; b.vy *= 0.6; }
   }
-  const cellC = (i) => [ox + ((i % gx) + 0.5) * CELL, oy + (Math.floor(i / gx) + 0.5) * CELL];
-  const borderCells = (d) => {
-    const out = [];
-    const x0 = Math.floor((d.x - ox) / CELL) - 1, x1 = Math.ceil((d.x + d.w - ox) / CELL), y0 = Math.floor((d.y - oy) / CELL) - 1, y1 = Math.ceil((d.y + d.h - oy) / CELL);
-    for (let x = x0; x <= x1; x++) for (const y of [y0, y1]) if (x >= 0 && y >= 0 && x < gx && y < gy && !blocked[y * gx + x]) out.push(y * gx + x);
-    for (let y = y0; y <= y1; y++) for (const x of [x0, x1]) if (x >= 0 && y >= 0 && x < gx && y < gy && !blocked[y * gx + x]) out.push(y * gx + x);
-    return out;
-  };
-  const route = (A, B) => {
-    const starts = borderCells(A), goals = new Set(borderCells(B));
-    if (!starts.length || !goals.size) return null;
-    const bc = [B.x + B.w / 2, B.y + B.h / 2];
-    starts.sort((i, j) => { const a = cellC(i), b = cellC(j); return Math.hypot(a[0] - bc[0], a[1] - bc[1]) - Math.hypot(b[0] - bc[0], b[1] - bc[1]); });
-    const start = starts[0];
-    const prev = new Int32Array(gx * gy).fill(-1); prev[start] = start;
-    const q = [start]; let head = 0, hit = -1;
-    while (head < q.length) {
-      const c = q[head++]; if (goals.has(c)) { hit = c; break; }
-      const x = c % gx, y = (c / gx) | 0;
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-        const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= gx || ny >= gy) continue;
-        const ni = ny * gx + nx; if (blocked[ni] || prev[ni] !== -1) continue; prev[ni] = c; q.push(ni);
-      }
-    }
-    if (hit < 0) return null;
-    const cells = []; for (let c = hit; ; c = prev[c]) { cells.push(c); if (c === start) break; }
-    cells.reverse();
-    return cells;
-  };
-  const segTraffic = new Map(); // "i-j" -> traffic
-  const streets = [];
-  const rankedTargets = [...inbound.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]);
-  const suffixFor = (rank, t) => (rank === 0 ? 'Ave' : rank < 3 ? 'St' : t >= 10 ? 'Rd' : 'Ln');
+
+  // each district gathers around its own square
+  const hubs = new Map();
+  for (const g of districts) { const bs = buildings.filter((b) => b.district === g.id); hubs.set(g.id, { id: g.id, x: mean(bs.map((b) => b.x)), y: mean(bs.map((b) => b.y)), r: 0.55 + 0.12 * Math.log2(1 + bs.length) }); }
+  const mainId = dOrder[0];
+  // streets join districts that import each other; busiest first, never crossing another street
+  const cross = (p1, p2, p3, p4) => { const o = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])); return o(p1, p2, p3) * o(p1, p2, p4) < 0 && o(p3, p4, p1) * o(p3, p4, p2) < 0; };
+  const pair = new Map(); for (const [k, n] of dEdges) { const [a, c] = k.split('>').map(Number); const kk = Math.min(a, c) + '|' + Math.max(a, c); pair.set(kk, (pair.get(kk) || 0) + n); }
+  const H = (id) => [hubs.get(id).x, hubs.get(id).y];
+  const kept = [];
+  const tryAdd = (a, c, n) => { const A = H(a), C = H(c); if (kept.some((s) => s.a !== a && s.a !== c && s.c !== a && s.c !== c && cross(A, C, H(s.a), H(s.c)))) return false; kept.push({ a, c, n }); return true; };
+  [...pair.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).forEach(([kk, n]) => { if (n < Math.max(1, totalTraffic * 0.004)) return; const [a, c] = kk.split('|').map(Number); tryAdd(a, c, n); });
+  // every district reaches the network: link loners to the nearest connected square
+  const linked = new Set([mainId]); kept.forEach((s) => { linked.add(s.a); linked.add(s.c); });
+  for (const id of dOrder) {
+    if (linked.has(id)) continue;
+    const cands = [...linked].sort((p, q) => Math.hypot(H(p)[0] - H(id)[0], H(p)[1] - H(id)[1]) - Math.hypot(H(q)[0] - H(id)[0], H(q)[1] - H(id)[1]));
+    for (const c of cands) if (tryAdd(id, c, 0)) break;
+    linked.add(id);
+  }
+  const dLabel = (id) => { const g = districts.find((x) => x.id === id); return g.civic ? 'Civic' : g.label; };
+  const streets = kept.map((s) => {
+    const tgt = (inbound.get(s.a) || 0) >= (inbound.get(s.c) || 0) ? s.a : s.c;
+    return { a: s.a, c: s.c, target: tgt, traffic: s.n, w: s.n ? 0.25 + 0.14 * Math.log2(1 + s.n) : 0.2, base: dLabel(tgt), suffix: s.n >= 10 ? 'Ave' : s.n >= 3 ? 'St' : 'Ln' };
+  }).sort((x, y) => y.traffic - x.traffic || x.a - y.a);
   const usedNames = new Set();
-  rankedTargets.forEach(([dt, tIn], rank) => {
-    const D = dById.get(dt); if (!D) return;
-    let base = D.civic ? 'Civic' : D.label;
-    let name = base + ' ' + suffixFor(rank, tIn);
-    if (usedNames.has(name)) name = base + ' Way'; usedNames.add(name);
-    const st = { name, target: dt, traffic: tIn, routes: [] };
-    for (const [k, n] of dEdges) {
-      const [da, dc] = k.split('>').map(Number); if (dc !== dt) continue;
-      if (n < Math.max(1, totalTraffic * 0.004)) continue;
-      const cells = route(dById.get(da), D); if (!cells) continue;
-      for (let i = 1; i < cells.length; i++) { const a = Math.min(cells[i - 1], cells[i]), b = Math.max(cells[i - 1], cells[i]); const key = a + '-' + b; segTraffic.set(key, (segTraffic.get(key) || 0) + n); }
-      st.routes.push({ from: da, n, pts: simplify(cells.map(cellC)) });
-    }
-    if (st.routes.length) streets.push(st);
-  });
-  function simplify(pts) { if (pts.length < 3) return pts; const out = [pts[0]]; for (let i = 1; i < pts.length - 1; i++) { const a = out[out.length - 1], b = pts[i], c = pts[i + 1]; if ((a[0] === b[0] && b[0] === c[0]) || (a[1] === b[1] && b[1] === c[1])) continue; out.push(b); } out.push(pts[pts.length - 1]); return out; }
-  const segs = [];
-  for (const [k, t] of segTraffic) { const [a, b] = k.split('-').map(Number); segs.push({ a: cellC(a), b: cellC(b), t }); }
-  // label anchor: longest straight run of the street's busiest route
-  streets.forEach((st) => {
-    const r = st.routes.sort((a, b) => b.n - a.n)[0];
-    let best = null, bl = -1;
-    for (let i = 1; i < r.pts.length; i++) { const L = Math.hypot(r.pts[i][0] - r.pts[i - 1][0], r.pts[i][1] - r.pts[i - 1][1]); if (L > bl) { bl = L; best = [r.pts[i - 1], r.pts[i]]; } }
-    st.label = best ? { x: (best[0][0] + best[1][0]) / 2, y: (best[0][1] + best[1][1]) / 2, horiz: Math.abs(best[0][1] - best[1][1]) < 1e-6, len: bl } : null;
-  });
+  streets.forEach((st) => { let nm = st.base + ' ' + st.suffix; if (usedNames.has(nm)) nm = st.base + ' Way'; if (usedNames.has(nm)) nm = st.base + ' Rd'; if (usedNames.has(nm)) nm = dLabel(st.a === st.target ? st.c : st.a) + ' ' + st.suffix; usedNames.add(nm); st.name = nm; });
+  // planned towns get straight streets; old towns bend
+  const curvePts = (st) => {
+    const [ax, ay] = H(st.a), [bx, by] = H(st.c);
+    const bend = planned ? 0 : (1 - order) * 0.22 * (rnd() * 2 - 1);
+    const cx = (ax + bx) / 2 - (by - ay) * bend, cy = (ay + by) / 2 + (bx - ax) * bend;
+    const pts = []; for (let i = 0; i <= 16; i++) { const t = i / 16; pts.push([(1 - t) * (1 - t) * ax + 2 * (1 - t) * t * cx + t * t * bx, (1 - t) * (1 - t) * ay + 2 * (1 - t) * t * cy + t * t * by]); }
+    return pts;
+  };
+  streets.forEach((st) => { st.pts = curvePts(st); });
 
-  // ---- relation lines (square spokes, power lines)
+  // clear the squares and the street corridors so roads run between buildings
+  const segDist = (px, py, a, b) => { const dx = b[0] - a[0], dy = b[1] - a[1], L = dx * dx + dy * dy || 1; const t = Math.max(0, Math.min(1, ((px - a[0]) * dx + (py - a[1]) * dy) / L)); const qx = a[0] + t * dx, qy = a[1] + t * dy; return [Math.hypot(px - qx, py - qy), qx, qy]; };
+  const N2 = buildings.length > 300 ? 90 : 300;
+  streets.forEach((st) => { const xs = st.pts.map((p) => p[0]), ys = st.pts.map((p) => p[1]); const pad = st.w / 2 + maxR + 0.5; st.bb = [Math.min(...xs) - pad, Math.min(...ys) - pad, Math.max(...xs) + pad, Math.max(...ys) + pad]; });
+  for (let it = 0; it < N2; it++) {
+    for (const b of buildings) {
+      b.vx = 0; b.vy = 0;
+      for (const st of streets) if (b.x > st.bb[0] && b.x < st.bb[2] && b.y > st.bb[1] && b.y < st.bb[3]) for (let k = 0; k < st.pts.length - 1; k++) { const [d, qx, qy] = segDist(b.x, b.y, st.pts[k], st.pts[k + 1]); const want = b.r * 0.85 + st.w / 2 + 0.25; if (d < want) { b.vx += (b.x - qx) / (d || 0.01) * (want - d) * 0.3; b.vy += (b.y - qy) / (d || 0.01) * (want - d) * 0.3; } }
+      for (const h of hubs.values()) { const d = Math.hypot(b.x - h.x, b.y - h.y); const want = b.r * 0.8 + h.r + 0.3; if (d < want) { b.vx += (b.x - h.x) / (d || 0.01) * (want - d) * 0.3; b.vy += (b.y - h.y) / (d || 0.01) * (want - d) * 0.3; } }
+    }
+    near((A, B) => sep(A, B, 0.1, 1.2, 0.25));
+    for (const b of buildings) { b.x += b.vx; b.y += b.vy; }
+  }
+  if (planned) buildings.forEach((b) => { b.x = Math.round(b.x * 2) / 2; b.y = Math.round(b.y * 2) / 2; });
+  // buildings face their square; planned towns square up to the compass
+  for (const b of buildings) { const h = hubs.get(b.district); b.ang = Math.atan2(h.y - b.y, h.x - b.x); if (planned) b.ang = Math.round(b.ang / (Math.PI / 2)) * (Math.PI / 2); }
+
+  // district ground and labels
+  const dOut = districts.map((g) => {
+    const bs = buildings.filter((b) => b.district === g.id); const h = hubs.get(g.id);
+    const langs = new Map(); bs.forEach((b) => langs.set(b.lang, (langs.get(b.lang) || 0) + b.lines));
+    const top = [...langs.entries()].sort((a, b) => b[1] - a[1])[0];
+    return { id: g.id, key: g.key, label: g.label, civic: !!g.civic, outskirts: g.outskirts || null, hub: { x: h.x, y: h.y, r: h.r }, main: g.id === mainId,
+      lang: top ? top[0] : 'other', lines: bs.reduce((a, b) => a + b.lines, 0), files: bs.reduce((a, b) => a + b.files, 0), bcount: bs.length };
+  });
+  const allX = buildings.map((b) => b.x), allY = buildings.map((b) => b.y);
+  const tcx = mean(allX), tcy = mean(allY);
+  dOut.forEach((d) => {
+    const bs = buildings.filter((b) => b.district === d.id);
+    const ang = Math.atan2(d.hub.y - tcy, d.hub.x - tcx) || -Math.PI / 2;
+    const far = Math.max(...bs.map((b) => (b.x - tcx) * Math.cos(ang) + (b.y - tcy) * Math.sin(ang) + b.r));
+    const along = (d.hub.x - tcx) * Math.cos(ang) + (d.hub.y - tcy) * Math.sin(ang);
+    const off = Math.max(0, far - along) + 0.55;
+    d.labelAt = { x: d.hub.x + Math.cos(ang) * off, y: d.hub.y + Math.sin(ang) * off };
+  });
+  const dById = new Map(dOut.map((d) => [d.id, d]));
+  const rimR = (b) => b.r + 1.6; // town edge hugs the buildings
+  const extent = (ang) => Math.max(...buildings.map((b) => (b.x - tcx) * Math.cos(ang) + (b.y - tcy) * Math.sin(ang) + rimR(b)));
+
+  // ---- relation lines (shown for the selected building only)
+  const links = [...edges.entries()].sort((a, b) => b[1] - a[1]).slice(0, 1500).map(([k, n]) => { const [a, c] = k.split('>').map(Number); return [a, c, n]; });
   const relations = [];
-  buildings.forEach((b) => {
-    if (b.special === 'square' || b.special === 'power' || b.special === 'water' || b.special === 'dyeworks') {
-      const imps = [...new Set(b.importers)].slice(0, 24);
-      relations.push({ from: b.id, to: imps, kind: b.special });
-    }
-  });
+  buildings.forEach((b) => { if (['square', 'power', 'water', 'dyeworks'].includes(b.special)) relations.push({ from: b.id, to: [...new Set(b.importers)].slice(0, 24), kind: b.special }); });
 
-  // ---- outside world: clearings
+  // ---- outside world: clearings sit outside the edge, toward the district that uses them
   const extList = [...ext.entries()].map(([name, e]) => ({ name, n: e.n, byB: e.byB, declared: e.declared || null, build: !!e.build, std: !!e.std, lm: landmarkFor(name) }))
     .filter((e) => e.n > 0 || e.declared === 'run' || e.build || e.lm)
     .sort((a, b) => (b.n + (b.declared === 'run' ? 3 : 0) + (b.lm ? 2 : 0)) - (a.n + (a.declared === 'run' ? 3 : 0) + (a.lm ? 2 : 0)) || (a.name < b.name ? -1 : 1));
-  const maxClear = Math.min(10, extList.length);
-  const cx = W / 2, cy = H / 2;
-  const R = Math.hypot(W, H) / 2 + 3.2;
-  const clearings = extList.slice(0, maxClear).map((e) => {
+  const clearings = extList.slice(0, 10).map((e) => {
     let bestD = null, bestN = -1;
     const perD = new Map(); for (const [bid, n] of e.byB) { const d = buildings[bid].district; perD.set(d, (perD.get(d) || 0) + n); }
     for (const [d, n] of perD) if (n > bestN) { bestN = n; bestD = d; }
     const D = bestD != null ? dById.get(bestD) : dOut.find((d) => d.civic) || dOut[0];
-    const ang = Math.atan2(D.y + D.h / 2 - cy, D.x + D.w / 2 - cx);
+    const ang = Math.atan2(D.hub.y - tcy, D.hub.x - tcx) || 0;
     const dev = e.declared === 'dev' || e.build;
     return { name: e.name, uses: e.n, kind: e.lm ? e.lm.key : null, label: e.lm ? e.lm.label : null, ang, r: 1.1 + 0.28 * Math.log2(1 + e.n), from: D.id, trail: dev && e.n === 0, std: e.std };
   });
   clearings.sort((a, b) => a.ang - b.ang);
-  for (let it = 0; it < 60; it++) {
-    let moved = false;
-    for (let i = 0; i < clearings.length; i++) {
-      const a = clearings[i], b = clearings[(i + 1) % clearings.length]; if (a === b) break;
-      let d = b.ang - a.ang; if (i === clearings.length - 1) d += Math.PI * 2;
-      const need = (a.r + b.r + 2.4) / R;
-      if (d < need) { const push = (need - d) / 2; a.ang -= push; b.ang += push; moved = true; }
-    }
-    if (!moved) break;
-  }
+  const minGap = 0.5;
+  for (let pass = 0; pass < 40 && clearings.length > 1; pass++) for (let i = 0; i < clearings.length; i++) { const a = clearings[i], b = clearings[(i + 1) % clearings.length]; let gap = b.ang - a.ang; if (i === clearings.length - 1) gap += Math.PI * 2; if (gap < minGap) { a.ang -= (minGap - gap) / 2; b.ang += (minGap - gap) / 2; } }
   clearings.forEach((c) => {
-    c.x = cx + Math.cos(c.ang) * R; c.y = cy + Math.sin(c.ang) * R;
-    const D = dById.get(c.from);
-    // road starts at plot edge nearest the clearing, aligned with the source district
-    const sx = Math.max(-0.4, Math.min(W + 0.4, D.x + D.w / 2)), sy = Math.max(-0.4, Math.min(H + 0.4, D.y + D.h / 2));
-    let ex = sx, ey = sy;
-    const dx = c.x - cx, dy = c.y - cy;
-    if (Math.abs(dx) / W > Math.abs(dy) / H) ex = dx > 0 ? W + 0.4 : -0.4; else ey = dy > 0 ? H + 0.4 : -0.4;
-    c.road = { pts: [[ex, ey], [c.x, c.y]], dashed: c.trail };
+    const e = extent(c.ang); const d = e + 1.2 + c.r;
+    c.x = tcx + Math.cos(c.ang) * d; c.y = tcy + Math.sin(c.ang) * d;
+    const sx = tcx + Math.cos(c.ang) * (e - 1.0), sy = tcy + Math.sin(c.ang) * (e - 1.0);
+    c.road = { pts: [[sx, sy], [c.x, c.y]], dashed: c.trail };
   });
 
   // ---- history and people
   const commits = scan.counts && scan.counts.commits != null ? scan.counts.commits : 1;
   const rings = Math.max(1, Math.min(9, Math.round(Math.log2(commits + 1))));
-  const rnd = rng(hashStr(scan.owner + '/' + scan.repo));
-  const civicD = dOut.find((d) => d.civic);
   const visitors = []; const vN = Math.min(24, scan.meta.stars || 0);
-  for (let i = 0; i < vN; i++) {
-    const t = rnd();
-    const side = Math.floor(rnd() * 4);
-    const x = side < 2 ? t * W : (side === 2 ? -0.3 : W + 0.3), y = side >= 2 ? t * H : (side === 0 ? -0.3 : H + 0.3);
-    visitors.push([x, y]);
-  }
+  for (let i = 0; i < vN; i++) { const a = rnd() * Math.PI * 2; const d = extent(a) - 0.6; visitors.push([tcx + Math.cos(a) * d, tcy + Math.sin(a) * d]); }
   const cranes = []; const nCr = Math.min(8, scan.meta.openIssues || 0);
   const craneable = buildings.filter((b) => !['stake', 'fence', 'plaque', 'trash', 'hut', 'hutcluster'].includes(b.kind)).sort((a, b) => hashStr(a.path) - hashStr(b.path));
   for (let i = 0; i < nCr && i < craneable.length; i++) cranes.push(craneable[i].id);
 
-  const minX = Math.min(-1.5, ...clearings.map((c) => c.x - c.r - 1.5)), maxX = Math.max(W + 1.5, ...clearings.map((c) => c.x + c.r + 1.5));
-  const minY = Math.min(-1.5, ...clearings.map((c) => c.y - c.r - 1.5)), maxY = Math.max(H + 1.5, ...clearings.map((c) => c.y + c.r + 1.5));
+  const ringPad = 1.6 + rings * 0.9;
+  const xs = [...buildings.map((b) => b.x - b.r - ringPad), ...buildings.map((b) => b.x + b.r + ringPad), ...clearings.map((c) => c.x - c.r - 1.2), ...clearings.map((c) => c.x + c.r + 1.2)];
+  const ys = [...buildings.map((b) => b.y - b.r - ringPad), ...buildings.map((b) => b.y + b.r + ringPad), ...clearings.map((c) => c.y - c.r - 1.2), ...clearings.map((c) => c.y + c.r + 1.6)];
+  const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+  const core = { x0: Math.min(...allX) - maxR - 1.6, y0: Math.min(...allY) - maxR - 1.6, x1: Math.max(...allX) + maxR + 1.6, y1: Math.max(...allY) + maxR + 1.6 };
+  const W = core.x1 - core.x0, H2 = core.y1 - core.y0;
+  const segs = [];
 
   // ---- archetype (rule-based)
   const archetype = classify({ districts: dOut, buildings, scan, edges, streets });
@@ -1088,9 +1105,10 @@ function buildTown(scan) {
   if (scan.truncated) notes.push('GitHub truncated the file tree for this repo.');
 
   return {
-    v: 1, mode: 'code', key: scan.owner + '/' + scan.repo, owner: scan.owner, repo: scan.repo,
-    W, H, bounds: { x0: minX, y0: minY, x1: maxX, y1: maxY },
-    districts: dOut, buildings: buildings.map(slimB), segs, streets: streets.map((s) => ({ name: s.name, traffic: s.traffic, target: s.target, label: s.label, routes: s.routes.map((r) => ({ from: r.from, n: r.n })) })),
+    v: 2, mode: 'code', layout: 'grown', key: scan.owner + '/' + scan.repo, owner: scan.owner, repo: scan.repo,
+    W, H: H2, bounds: { x0: minX, y0: minY, x1: maxX, y1: maxY }, core, center: [tcx, tcy], order: Math.round(order * 100) / 100,
+    districts: dOut, buildings: buildings.map(slimB), segs, links,
+    streets: streets.map((s) => ({ name: s.name, traffic: s.traffic, target: s.target, w: s.w, pts: s.pts.map(([x, y]) => [Math.round(x * 100) / 100, Math.round(y * 100) / 100]) })),
     relations, clearings, rings, visitors, cranes,
     monuments: Math.min(6, (scan.counts && scan.counts.releases) || 0),
     archived: scan.meta.archived, fork: scan.meta.fork, parent: scan.meta.parent,
@@ -1105,7 +1123,8 @@ function buildTown(scan) {
 }
 
 function slimB(b) {
-  return { id: b.id, name: b.name, path: b.path, x: b.x, y: b.y, w: b.w, d: b.d, h: b.h, lang: b.lang, kind: b.kind, special: b.special || null, landmark: b.landmark ? { key: b.landmark.key, label: b.landmark.label, lib: b.landmark.lib } : null, deco: b.deco, lines: b.lines, files: b.files, inDeg: b.inDeg, outDeg: b.outDeg, district: b.district, folder: !!b.folder, count: b.count || 0 };
+  const r2 = (v) => Math.round(v * 1000) / 1000;
+  return { id: b.id, name: b.name, path: b.path, x: r2(b.x), y: r2(b.y), w: r2(b.w), d: r2(b.d), h: r2(b.h), ang: r2(b.ang || 0), r: r2(b.r || 0), lang: b.lang, kind: b.kind, special: b.special || null, landmark: b.landmark ? { key: b.landmark.key, label: b.landmark.label, lib: b.landmark.lib } : null, deco: b.deco, lines: b.lines, files: b.files, inDeg: b.inDeg, outDeg: b.outDeg, district: b.district, folder: !!b.folder, count: b.count || 0 };
 }
 
 function classify({ districts, buildings, scan, edges, streets }) {
@@ -1211,7 +1230,7 @@ function buildListTown(scan) {
   const colsOut = cols.map((c, i) => ({ name: c, x: i * CW, n: colTot[i], w: 0.08 + 0.3 * (colTot[i] / maxC) }));
   const kinds = { article: 0, repo: 0, video: 0 }; buildings.forEach((b) => kinds[b.kind.slice(5)]++);
   return {
-    v: 1, mode: 'list', key: scan.owner + '/' + scan.repo, owner: scan.owner, repo: scan.repo,
+    v: 2, mode: 'list', key: scan.owner + '/' + scan.repo, owner: scan.owner, repo: scan.repo,
     W, H, bounds: { x0: -1, y0: -1.2, x1: W + 1, y1: H + 2.6 },
     grid: { CW, RH, rows: rowsOut, cols: colsOut, fog, cells, byLang: useLang },
     districts: [], buildings, segs: [], streets: [], relations: [], clearings: [], rings: Math.max(1, Math.min(9, Math.round(Math.log2((scan.counts && scan.counts.commits || 1) + 1)))),
@@ -1222,12 +1241,12 @@ function buildListTown(scan) {
 }
 
 /* ---- render.js ---- */
-/* GitHoods renderers: one town layout, two projections (street map and isometric). Canvas 2D. */
+/* GitHoods renderers: one grown town layout, two projections (street map and isometric). Canvas 2D. */
 
 const PAL = {
-  ink: '#5A3A22', inkSoft: '#8A6A44', parch: '#F3EAD7', block: '#EEE2C9', road: '#DCCBA8', roadEdge: '#B7A07A',
-  street: '#F8F0DE', streetCase: '#8A6A44', fog: '#D9D5CC', fogDot: '#B6AFA2', water: '#D6E3E1', gold: '#B8901E',
-  coral: '#E8735A', teal: '#5E9E8A', violet: '#8E6CC9', sand: '#E9B949', label: '#3B2A1A', labelSoft: '#6E5A44',
+  ink: '#5A3A22', inkSoft: '#8A6A44', parch: '#F3EAD7', land: '#F1E8D4', block: '#EDE2CA', blockRim: '#CDB892', road: '#DCCBA8', roadEdge: '#B7A07A',
+  street: '#FBF5E8', streetCase: '#8A6A44', lane: '#D8C7A3', fog: '#D9D5CC', fogDot: '#B6AFA2', water: '#D6E3E1', gold: '#B8901E',
+  coral: '#E8735A', teal: '#5E9E8A', violet: '#8E6CC9', sand: '#E9B949', label: '#3B2A1A', labelSoft: '#6E5A44', ring1: '#E7DCC6', ring2: '#EDE4D2',
 };
 function shade(hex, k) { const h = hex.replace('#', ''); const r = [0, 2, 4].map((i) => Math.max(0, Math.min(255, Math.round(parseInt(h.slice(i, i + 2), 16) * k)))); return '#' + r.map((v) => v.toString(16).padStart(2, '0')).join(''); }
 function langColor(l) { return LANG_COLORS[l] || LANG_COLORS.other; }
@@ -1239,33 +1258,54 @@ function makeFogPattern(ctx) {
   const g = c.getContext('2d'); g.fillStyle = PAL.fog; g.fillRect(0, 0, 8, 8); g.fillStyle = PAL.fogDot; g.beginPath(); g.arc(2, 2, 0.8, 0, 7); g.arc(6, 6, 0.8, 0, 7); g.fill();
   return ctx.createPattern(c, 'repeat');
 }
+// corners of a rotated building footprint in world space, in order around the rectangle
+function bCorners(b) {
+  const c = Math.cos(b.ang || 0), s = Math.sin(b.ang || 0), hw = b.w / 2, hd = b.d / 2;
+  return [[-hw, -hd], [hw, -hd], [hw, hd], [-hw, hd]].map(([u, v]) => [b.x + u * c - v * s, b.y + u * s + v * c]);
+}
+function convexHull(pts) {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]); if (p.length < 3) return p;
+  const cr = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = []; for (const q of p) { while (lo.length >= 2 && cr(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  const up = []; for (let i = p.length - 1; i >= 0; i--) { const q = p[i]; while (up.length >= 2 && cr(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
+function inPoly(poly, x, y) { let inside = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside; } return inside; }
 
 class TownView {
   constructor(canvas, onHover) {
     this.cv = canvas; this.ctx = canvas.getContext('2d'); this.onHover = onHover || (() => {});
     this.mode = 'plan'; this.town = null; this.cam = { x: 0, y: 0, z: 20 }; this.hover = null; this.pinned = null;
-    this.fog = makeFogPattern(this.ctx);
+    this.fog = makeFogPattern(this.ctx); this._hz = 0.9;
     this._bind();
     new ResizeObserver(() => this.resize()).observe(canvas);
   }
-  setTown(t) { this.town = t; this.hover = null; this.pinned = null; this.fit(); }
-  setMode(m) { this.mode = m; this.fit(); }
+  setTown(t) {
+    this.town = t; this.hover = null; this.pinned = null; this._hulls = null; this._isoOrder = null;
+    if (t && t.mode === 'code' && t.v >= 2) {
+      // per-building lookups for selection lines
+      t._out = new Map(); t._in = new Map();
+      for (const [a, c, n] of t.links || []) { if (!t._out.has(a)) t._out.set(a, []); t._out.get(a).push([c, n]); if (!t._in.has(c)) t._in.set(c, []); t._in.get(c).push([a, n]); }
+      t._hub = new Map(t.districts.map((d) => [d.id, d.hub]));
+    }
+    this.fit();
+  }
+  setMode(m) { this.mode = m; this._hulls = null; this._isoOrder = null; this.fit(); }
   resize() {
     const r = this.cv.getBoundingClientRect(); const dpr = window.devicePixelRatio || 1;
     this.cv.width = Math.max(1, Math.round(r.width * dpr)); this.cv.height = Math.max(1, Math.round(r.height * dpr)); this.dpr = dpr;
     if (!this._fitted) this.fit(); else this.draw();
   }
-  // world -> view space (before camera)
   P(x, y, z = 0) { return this.mode === 'plan' ? [x, y] : [(x - y) * 0.87, (x + y) * 0.5 - z]; }
   S(x, y, z = 0) { const [vx, vy] = this.P(x, y, z); const c = this.cam; return [(vx - c.x) * c.z + this.cv.width / 2 / this.dpr, (vy - c.y) * c.z + this.cv.height / 2 / this.dpr]; }
   fit() {
-    const t = this.town; if (!t) return;
-    const b = t.bounds; const pts = [[b.x0, b.y0], [b.x1, b.y0], [b.x1, b.y1], [b.x0, b.y1]].map(([x, y]) => this.P(x, y));
-    if (this.mode === 'iso') { const maxH = Math.max(1, ...t.buildings.map((q) => q.h || 0)) * 1.4; pts.push(...pts.map(([x, y]) => [x, y - maxH])); }
+    const t = this.town; if (!t || !this.dpr) return;
+    const b = this.mode === 'iso' && t.core ? t.core : t.bounds; const pts = [[b.x0, b.y0], [b.x1, b.y0], [b.x1, b.y1], [b.x0, b.y1]].map(([x, y]) => this.P(x, y));
+    if (this.mode === 'iso') { const maxH = Math.max(1, ...t.buildings.map((q) => q.h || 0)) * this._hz * 1.2; pts.push(...pts.map(([x, y]) => [x, y - maxH])); }
     const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
     const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
-    const W = this.cv.width / (this.dpr || 1), H = this.cv.height / (this.dpr || 1);
-    this.cam = { x: (Math.max(...xs) + Math.min(...xs)) / 2, y: (Math.max(...ys) + Math.min(...ys)) / 2, z: Math.min(W / (w || 1), H / (h || 1)) * 0.96 };
+    const W = this.cv.width / this.dpr, H = this.cv.height / this.dpr;
+    this.cam = { x: (Math.max(...xs) + Math.min(...xs)) / 2, y: (Math.max(...ys) + Math.min(...ys)) / 2, z: Math.min(W / (w || 1), H / (h || 1)) * 0.97 };
     this._fitted = true; this.draw();
   }
   _bind() {
@@ -1294,29 +1334,33 @@ class TownView {
   _hoverAt(sx, sy, click) {
     const t = this.town; if (!t) return;
     let hit = null;
-    if (this.mode === 'plan') {
-      const c = this.cam, W = this.cv.width / this.dpr, H = this.cv.height / this.dpr;
-      const x = (sx - W / 2) / c.z + c.x, y = (sy - H / 2) / c.z + c.y;
-      for (let i = t.buildings.length - 1; i >= 0; i--) { const b = t.buildings[i]; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.d) { hit = { type: 'building', b }; break; } }
-      if (!hit) for (const cl of t.clearings) if (Math.hypot(x - cl.x, y - cl.y) < cl.r * 1.3) { hit = { type: 'clearing', c: cl }; break; }
-      if (!hit && t.mode === 'code') for (const d of t.districts) if (x >= d.x && x <= d.x + d.w && y >= d.y && y <= d.y + d.h) { hit = { type: 'district', d }; break; }
-    } else {
-      const order = this._isoOrder || [];
-      for (let i = order.length - 1; i >= 0; i--) { const b = order[i]; if (this._inIsoBox(b, sx, sy)) { hit = { type: 'building', b }; break; } }
-      if (!hit) for (const cl of t.clearings) { const [px, py] = this.S(cl.x, cl.y); if (Math.hypot(sx - px, (sy - py) * 1.6) < cl.r * this.cam.z) { hit = { type: 'clearing', c: cl }; break; } }
+    if (t.mode === 'list') hit = this._hitList(sx, sy);
+    else if (t.v >= 2) {
+      if (this.mode === 'plan') {
+        const c = this.cam, W = this.cv.width / this.dpr, H = this.cv.height / this.dpr;
+        const x = (sx - W / 2) / c.z + c.x, y = (sy - H / 2) / c.z + c.y;
+        for (let i = t.buildings.length - 1; i >= 0 && !hit; i--) if (inPoly(bCorners(t.buildings[i]), x, y)) hit = { type: 'building', b: t.buildings[i] };
+        if (!hit) for (const cl of t.clearings) if (Math.hypot(x - cl.x, y - cl.y) < cl.r) { hit = { type: 'clearing', c: cl }; break; }
+        if (!hit) { let best = null, bd = 1e9; for (const b of t.buildings) { const d = Math.hypot(x - b.x, y - b.y) - b.r - 0.6; if (d < 0 && d < bd) { bd = d; best = b; } } if (best) hit = { type: 'district', d: t.districts.find((d) => d.id === best.district) }; }
+        if (!hit) for (const d of t.districts) if (Math.hypot(x - d.hub.x, y - d.hub.y) < d.hub.r) { hit = { type: 'district', d }; break; }
+      } else {
+        const order = this._isoOrder || [];
+        for (let i = order.length - 1; i >= 0 && !hit; i--) { const b = order[i]; const z = this._bH(b); const pts = bCorners(b).flatMap(([x, y]) => [this.S(x, y, 0), this.S(x, y, z)]); if (inPoly(convexHull(pts), sx, sy)) hit = { type: 'building', b }; }
+        if (!hit) for (const cl of t.clearings) { const [px, py] = this.S(cl.x, cl.y); if (Math.hypot(sx - px, (sy - py) * 1.6) < cl.r * this.cam.z) { hit = { type: 'clearing', c: cl }; break; } }
+      }
     }
     if (click) this.pinned = hit;
     this.hover = hit; this.draw(); this.onHover(this.pinned || hit, !!this.pinned);
   }
-  _inIsoBox(b, sx, sy) {
-    const z = b.h * this._hz;
-    const poly = [this.S(b.x, b.y, z), this.S(b.x + b.w, b.y, z), this.S(b.x + b.w, b.y, 0), this.S(b.x + b.w, b.y + b.d, 0), this.S(b.x, b.y + b.d, 0), this.S(b.x, b.y + b.d, z)];
-    let inside = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > sy) !== (yj > sy) && sx < ((xj - xi) * (sy - yi)) / (yj - yi) + xi) inside = !inside; }
-    return inside;
+  _hitList(sx, sy) {
+    const t = this.town;
+    if (this.mode === 'plan') { const c = this.cam, W = this.cv.width / this.dpr, H = this.cv.height / this.dpr; const x = (sx - W / 2) / c.z + c.x, y = (sy - H / 2) / c.z + c.y; for (let i = t.buildings.length - 1; i >= 0; i--) { const b = t.buildings[i]; if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.d) return { type: 'building', b }; } return null; }
+    const order = this._isoOrder || [];
+    for (let i = order.length - 1; i >= 0; i--) { const b = order[i]; const z = (b.h || 0.35) * this._hz; const pts = [[b.x, b.y], [b.x + b.w, b.y], [b.x + b.w, b.y + b.d], [b.x, b.y + b.d]].flatMap(([x, y]) => [this.S(x, y, 0), this.S(x, y, z)]); if (inPoly(convexHull(pts), sx, sy)) return { type: 'building', b }; }
+    return null;
   }
 
-  /* ---------- drawing ---------- */
+  /* ---------- shared drawing helpers ---------- */
   draw() {
     const t = this.town, ctx = this.ctx; if (!t || !this.dpr) return;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
@@ -1324,86 +1368,47 @@ class TownView {
     ctx.fillStyle = PAL.fog; ctx.fillRect(0, 0, W, H);
     ctx.save(); const [ox, oy] = this.S(0, 0); ctx.translate(ox % 8, oy % 8); ctx.fillStyle = this.fog; ctx.fillRect(-8, -8, W + 16, H + 16); ctx.restore();
     if (t.mode === 'list') return this.mode === 'plan' ? this._drawListPlan(t) : this._drawListIso(t);
-    return this.mode === 'plan' ? this._drawPlan(t) : this._drawIso(t);
+    if (!(t.v >= 2)) { this._text('This town uses the old layout.', W / 2, H / 2 - 10, { size: 13 }); this._text('It is being rebuilt; check back in a few minutes.', W / 2, H / 2 + 10, { size: 13 }); return; }
+    return this._drawGrown(t);
   }
   _poly(pts, fill, stroke, lw) { const c = this.ctx; c.beginPath(); pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); if (fill) { c.fillStyle = fill; c.fill(); } if (stroke) { c.strokeStyle = stroke; c.lineWidth = lw || 0.6; c.stroke(); } }
   _rectW(x, y, w, h, z = 0) { return [this.S(x, y, z), this.S(x + w, y, z), this.S(x + w, y + h, z), this.S(x, y + h, z)]; }
-  _segPoly(a, b, w) { const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, nx = (-dy / L) * w / 2, ny = (dx / L) * w / 2; const ex = (dx / L) * w / 2, ey = (dy / L) * w / 2; return [this.S(a[0] + nx - ex, a[1] + ny - ey), this.S(b[0] + nx + ex, b[1] + ny + ey), this.S(b[0] - nx + ex, b[1] - ny + ey), this.S(a[0] - nx - ex, a[1] - ny - ey)]; }
-  _circleW(x, y, r, n = 28) { const out = []; for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; out.push(this.S(x + Math.cos(a) * r, y + Math.sin(a) * r)); } return out; }
+  _circleW(x, y, r, n = 20) { const out = []; for (let i = 0; i < n; i++) { const a = (i / n) * Math.PI * 2; out.push(this.S(x + Math.cos(a) * r, y + Math.sin(a) * r)); } return out; }
   _text(s, x, y, o = {}) {
     const c = this.ctx; c.font = `${o.w || 400} ${o.size || 11}px system-ui, -apple-system, "Segoe UI", sans-serif`; c.textAlign = o.align || 'center'; c.textBaseline = o.base || 'middle';
     if (o.halo !== false) { c.lineWidth = 3; c.strokeStyle = o.haloColor || 'rgba(243,234,215,0.92)'; c.lineJoin = 'round'; c.strokeText(s, x, y); }
     c.fillStyle = o.color || PAL.label; c.fillText(s, x, y);
   }
-  _streetW(t) { return Math.min(0.9, 0.16 + 0.17 * Math.log2(1 + t)); }
-
-  _revealGround(t, iso) {
-    const pad = 0.7;
-    this._poly(this._rectW(-pad, -pad, t.W + 2 * pad, t.H + 2 * pad), PAL.parch, PAL.inkSoft, 0.8);
-    for (const c of t.clearings) {
-      this._strokeSeg(c.road.pts[0], c.road.pts[1], 1.1, PAL.parch);
-      this._poly(this._circleW(c.x, c.y, c.r * 0.95), PAL.parch, '#C9B79C', 0.6);
-    }
+  // a set of world-space circles filled as one shape (ground blobs); in isometric they become ellipses
+  _blobs(list, fill) {
+    const c = this.ctx; c.beginPath();
+    if (this.mode === 'plan') for (const [x, y, r] of list) { const [sx, sy] = this.S(x, y); c.moveTo(sx + r * this.cam.z, sy); c.arc(sx, sy, r * this.cam.z, 0, Math.PI * 2); }
+    else for (const [x, y, r] of list) { const [sx, sy] = this.S(x, y); const rx = r * this.cam.z * 1.23, ry = r * this.cam.z * 0.707; c.moveTo(sx + rx, sy); c.ellipse(sx, sy, rx, ry, 0, 0, Math.PI * 2); }
+    c.fillStyle = fill; c.fill('nonzero');
   }
-  _drawRings(t) {
-    const c = this.ctx; c.save(); c.setLineDash([3, 3]); c.strokeStyle = PAL.inkSoft; c.lineWidth = 0.7;
-    const R0 = Math.hypot(t.W, t.H) / 2;
-    for (let i = 0; i < t.rings; i++) { const r = R0 * (0.62 + i * 0.07); this._poly(this._circleW(t.W / 2, t.H / 2, r, 64), null, PAL.inkSoft, 0.6); }
-    c.restore();
-  }
-  _drawRoadsBase(t) {
-    this._poly(this._rectW(-0.35, -0.35, t.W + 0.7, t.H + 0.7), PAL.road, PAL.roadEdge, 0.6);
-    for (const d of t.districts) this._poly(this._rectW(d.x, d.y, d.w, d.h), d.civic ? '#F1E6CF' : PAL.block, PAL.roadEdge, 0.6);
-  }
-  _strokeSeg(a, b, w, color, dash) {
-    const c = this.ctx; c.save(); c.strokeStyle = color; c.lineWidth = Math.max(1, w * this.cam.z * (this.mode === 'iso' ? 0.75 : 1)); c.lineCap = dash ? 'butt' : 'round'; if (dash) c.setLineDash(dash);
-    c.beginPath(); c.moveTo(...this.S(...a)); c.lineTo(...this.S(...b)); c.stroke(); c.restore();
-  }
-  _roadPts(c) { const [a, b] = c.road.pts; const dx = b[0] - a[0], dy = b[1] - a[1], L = Math.hypot(dx, dy) || 1, k = Math.max(0, L - c.r * 0.62) / L; return [a, [a[0] + dx * k, a[1] + dy * k]]; }
-  _drawStreets(t) {
-    for (const s of t.segs) this._strokeSeg(s.a, s.b, this._streetW(s.t) + 0.14, PAL.streetCase);
-    for (const c of t.clearings) if (!c.road.dashed) this._strokeSeg(...this._roadPts(c), this._streetW(c.uses || 1) + 0.14, PAL.streetCase);
-    for (const s of t.segs) this._strokeSeg(s.a, s.b, this._streetW(s.t), PAL.street);
-    for (const c of t.clearings) {
-      const [a, b] = this._roadPts(c);
-      if (c.road.dashed) { const ctx = this.ctx; ctx.save(); ctx.setLineDash([4, 4]); ctx.strokeStyle = PAL.ink; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(...this.S(...a)); ctx.lineTo(...this.S(...b)); ctx.stroke(); ctx.restore(); }
-      else this._strokeSeg(a, b, this._streetW(c.uses || 1), PAL.street);
-    }
-  }
-  _drawRelations(t) {
-    const ctx = this.ctx; const bs = t.buildings;
-    for (const r of t.relations) {
-      const f = bs[r.from]; const fc = [f.x + f.w / 2, f.y + f.d / 2];
-      ctx.save();
-      if (r.kind === 'power') { ctx.setLineDash([2, 3]); ctx.strokeStyle = PAL.gold; ctx.lineWidth = 0.9; }
-      else if (r.kind === 'water') { ctx.setLineDash([1, 3]); ctx.strokeStyle = '#6E9AA0'; ctx.lineWidth = 0.9; }
-      else if (r.kind === 'dyeworks') { ctx.setLineDash([1, 2]); ctx.strokeStyle = PAL.violet; ctx.lineWidth = 0.7; }
-      else { ctx.strokeStyle = PAL.ink; ctx.lineWidth = 0.5; ctx.globalAlpha = 0.6; }
-      for (const id of r.to) {
-        const b = bs[id]; const p = this.S(...fc), q = this.S(b.x + b.w / 2, b.y + b.d / 2);
-        ctx.beginPath(); ctx.moveTo(...p);
-        if (r.kind === 'square') ctx.lineTo(...q); else { const mx = (p[0] + q[0]) / 2, my = Math.min(p[1], q[1]) - 18; ctx.quadraticCurveTo(mx, my, ...q); }
-        ctx.stroke();
-      }
-      ctx.restore();
-    }
+  _line(pts, w, color, opts = {}) {
+    const c = this.ctx; c.save(); c.beginPath(); pts.forEach(([x, y], i) => { const [sx, sy] = this.S(x, y); i ? c.lineTo(sx, sy) : c.moveTo(sx, sy); });
+    c.strokeStyle = color; c.lineWidth = Math.max(opts.min || 1, w * this.cam.z * (this.mode === 'iso' ? 0.8 : 1)); c.lineCap = opts.cap || 'round'; c.lineJoin = 'round'; if (opts.dash) c.setLineDash(opts.dash); if (opts.alpha) c.globalAlpha = opts.alpha; c.stroke(); c.restore();
   }
   _bFill(b) {
     if (b.kind === 'yard') return '#E4DED0';
     if (b.kind === 'gallery') return '#F3EAD7';
     if (b.kind === 'trash') return '#8A8170';
-    if (b.kind === 'library' || b.kind === 'reading') return '#F6E7B0';
-    if (b.kind === 'hall') return '#F6E7B0';
+    if (b.kind === 'library' || b.kind === 'reading' || b.kind === 'hall') return '#F6E7B0';
     if (b.kind === 'plaque') return PAL.sand;
     if (b.kind === 'customs') return '#EFE0B8';
     if (b.kind === 'depot' || b.kind === 'port' || b.kind === 'shed' || b.kind === 'works') return '#E6D3B8';
     return langColor(b.lang);
   }
-  _drawPlanBuilding(b, hl) {
-    const ctx = this.ctx; const p = this._rectW(b.x, b.y, b.w, b.d); const [x0, y0] = p[0]; const [x1, y1] = p[2];
-    const w = x1 - x0, h = y1 - y0;
-    this._poly(p, this._bFill(b), hl ? PAL.coral : PAL.ink, hl ? 2 : 0.6);
-    if (w < 5) return;
+  _bH(b) { return ['stake', 'fence', 'plaque', 'trash'].includes(b.kind) ? 0.12 : b.h * this._hz; }
+
+  // Draws a building's roof plan in a local frame already rotated to the building (x0..x1 along its width).
+  _planGlyph(b, x0, y0, w, h, hl) {
+    const ctx = this.ctx; const x1 = x0 + w, y1 = y0 + h;
+    ctx.beginPath(); ctx.rect(x0, y0, w, h); ctx.fillStyle = this._bFill(b); ctx.fill(); ctx.strokeStyle = hl ? PAL.coral : PAL.ink; ctx.lineWidth = hl ? 2.2 : 0.7; ctx.stroke();
+    // door on the side facing the square
+    if (w > 6) { ctx.fillStyle = PAL.ink; ctx.fillRect(x1 - Math.max(1.5, w * 0.06), -Math.max(1.5, h * 0.12), Math.max(1.5, w * 0.06), Math.max(3, h * 0.24)); }
+    if (Math.min(w, h) < 7) return;
     ctx.save(); ctx.strokeStyle = PAL.ink; ctx.fillStyle = PAL.ink; ctx.lineWidth = 0.6;
     const cx = x0 + w / 2, cy = y0 + h / 2, m = Math.min(w, h);
     const k = b.landmark ? b.landmark.key : b.special || b.kind;
@@ -1436,23 +1441,147 @@ class TownView {
     if (b.deco && b.deco.silo && w > 10) { ctx.globalAlpha = 1; ctx.beginPath(); ctx.arc(x1 - w * 0.14, y1 - h * 0.14, Math.max(1.5, m * 0.08), 0, 7); ctx.fillStyle = '#CFE3E0'; ctx.fill(); ctx.strokeStyle = PAL.ink; ctx.stroke(); }
     ctx.restore();
   }
-  _drawPlan(t) {
-    this._revealGround(t, false);
-    this._drawRings(t);
-    this._drawRoadsBase(t);
-    this._drawStreets(t);
+  /* ---------- grown towns ---------- */
+  _drawGrown(t) {
+    const iso = this.mode === 'iso', z = this.cam.z;
+    const B = t.buildings;
+    // growth rings follow the town's own outline
+    for (let k = t.rings; k >= 1; k--) { this.ctx.save(); this.ctx.globalAlpha = 0.16 + 0.04 * k; this._blobs(B.map((b) => [b.x, b.y, b.r + 1.6 + k * 0.9]), k % 2 ? PAL.ring1 : PAL.ring2); this.ctx.restore(); }
+    // clearing roads leave from the town's edge
+    for (const c of t.clearings) { if (c.road.dashed) continue; this._line(c.road.pts, 0.5, PAL.streetCase); this._line(c.road.pts, 0.38, PAL.street); }
+    // town land: ink rim, then land
+    this._blobs(B.map((b) => [b.x, b.y, b.r + 1.72]), PAL.inkSoft);
+    this._blobs(B.map((b) => [b.x, b.y, b.r + 1.62]), PAL.land);
+    if (t.archived) { this.ctx.save(); this.ctx.globalAlpha = 0.25; this._blobs(B.map((b) => [b.x, b.y, b.r + 1.62]), '#9A9284'); this.ctx.restore(); }
+    // district ground: one rim pass then fills, so neighbours keep a visible edge
+    for (const d of t.districts) this._blobs(B.filter((b) => b.district === d.id).map((b) => [b.x, b.y, b.r + 0.62]).concat([[d.hub.x, d.hub.y, d.hub.r + 0.5]]), PAL.blockRim);
+    for (const d of t.districts) this._blobs(B.filter((b) => b.district === d.id).map((b) => [b.x, b.y, b.r + 0.55]).concat([[d.hub.x, d.hub.y, d.hub.r + 0.43]]), d.civic ? '#F2E7CF' : PAL.block);
+    // lanes: every building reaches its square
+    for (const b of B) { const h = t._hub.get(b.district); this._line([[b.x, b.y], [h.x, h.y]], 0.15, PAL.lane, { min: 0.8 }); }
+    for (const c of t.clearings) if (c.road.dashed) this._line(c.road.pts, 0.06, PAL.ink, { dash: [4, 4], cap: 'butt', min: 1.2 });
+    // streets between squares, width by import traffic
+    for (const s of t.streets) this._line(s.pts, s.w + 0.14, PAL.streetCase);
+    for (const s of t.streets) this._line(s.pts, s.w, PAL.street);
+    // squares
+    for (const d of t.districts) {
+      const pts = this._circleW(d.hub.x, d.hub.y, d.hub.r, 28);
+      this._poly(pts, PAL.street, PAL.streetCase, d.main ? 2 : 1.3);
+    }
+    this._drawSelection(t, 'ground');
+    // buildings
     const hl = this.pinned || this.hover;
-    for (const b of t.buildings) this._drawPlanBuilding(b, hl && hl.type === 'building' && hl.b.id === b.id);
-    this._drawRelations(t);
-    if (t.archived) { const c = this.ctx; c.save(); c.globalAlpha = 0.25; this._poly(this._rectW(-0.7, -0.7, t.W + 1.4, t.H + 1.4), '#9A9284'); c.restore(); }
+    if (iso) {
+      const order = [...B].sort((a, b) => (a.x + a.y) - (b.x + b.y) || a.id - b.id); this._isoOrder = order;
+      for (const b of order) this._drawIsoBuilding(b, hl && hl.type === 'building' && hl.b.id === b.id);
+    } else {
+      for (const b of B) {
+        const [sx, sy] = this.S(b.x, b.y); const w = b.w * z, h = b.d * z;
+        this.ctx.save(); this.ctx.translate(sx, sy); this.ctx.rotate(b.ang || 0);
+        this._planGlyph(b, -w / 2, -h / 2, w, h, hl && hl.type === 'building' && hl.b.id === b.id);
+        this.ctx.restore();
+      }
+    }
+    this._drawSelection(t, 'over');
     this._drawClearings(t);
     this._drawPeople(t);
-    this._drawLabels(t);
+    this._drawStreetLabels(t); this._drawDistrictLabels(t);
+  }
+  // imports of the selected building only: ink to what it uses, coral from what uses it
+  _drawSelection(t, phase) {
+    const hl = this.pinned || this.hover; if (!hl || hl.type !== 'building' || phase !== 'over') return;
+    const b = hl.b, ctx = this.ctx; const lift = (q) => (this.mode === 'iso' ? this._bH(q) : 0);
+    const go = (list, color) => {
+      for (const [id, n] of list || []) {
+        const q = t.buildings[id]; const p0 = this.S(b.x, b.y, lift(b)), p1 = this.S(q.x, q.y, lift(q));
+        ctx.save(); ctx.strokeStyle = color; ctx.lineWidth = Math.min(4, 1 + Math.log2(1 + n)); ctx.globalAlpha = 0.85;
+        const mx = (p0[0] + p1[0]) / 2, my = (p0[1] + p1[1]) / 2 - Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) * 0.2;
+        ctx.beginPath(); ctx.moveTo(...p0); ctx.quadraticCurveTo(mx, my, ...p1); ctx.stroke();
+        ctx.beginPath(); ctx.arc(p1[0], p1[1], 2.5, 0, 7); ctx.fillStyle = color; ctx.fill(); ctx.restore();
+      }
+    };
+    go(t._out.get(b.id), PAL.ink); go(t._in.get(b.id), PAL.coral);
+  }
+  _drawStreetLabels(t) {
+    const ctx = this.ctx; const placed = [];
+    for (const s of t.streets) {
+      if (!s.name) continue;
+      const sp = s.pts.map(([x, y]) => this.S(x, y));
+      let len = 0; for (let i = 1; i < sp.length; i++) len += Math.hypot(sp[i][0] - sp[i - 1][0], sp[i][1] - sp[i - 1][1]);
+      ctx.font = '600 11px system-ui, sans-serif'; const tw = ctx.measureText(s.name).width;
+      if (len < tw + 16) continue;
+      const m = Math.floor(sp.length / 2); const a = sp[m - 1], b = sp[m + 1] || sp[m];
+      const [x, y] = sp[m];
+      if (placed.some(([px, py]) => Math.abs(px - x) < tw * 0.8 && Math.abs(py - y) < 14)) continue;
+      if (this._covered(x, y, tw)) continue;
+      placed.push([x, y]);
+      let ang = Math.atan2(b[1] - a[1], b[0] - a[0]); if (ang > Math.PI / 2) ang -= Math.PI; if (ang < -Math.PI / 2) ang += Math.PI;
+      ctx.save(); ctx.translate(x, y); ctx.rotate(ang);
+      this._text(s.name, 0, 0, { w: 600, color: '#2E2012', size: 11, haloColor: 'rgba(251,245,232,0.95)' });
+      ctx.restore();
+    }
+  }
+  _drawDistrictLabels(t) {
+    const ctx = this.ctx;
+    for (const d of t.districts) {
+      if (d.bcount < 1) continue;
+      const [x, y] = this.S(d.labelAt.x, d.labelAt.y);
+      ctx.font = '500 12px system-ui, sans-serif'; if (this._covered(x, y, ctx.measureText(d.label).width)) continue;
+      if (this.cam.z * Math.sqrt(d.bcount) < 9 && !d.main) continue;
+      this._text(d.label, x, y, { w: 500, size: 12, color: PAL.labelSoft });
+    }
+  }
+  _covered(x, y, tw) {
+    if (this.mode !== 'iso' || !this._isoOrder) return false;
+    if (!this._hulls || this._hullsFor !== this.cam.x + ',' + this.cam.y + ',' + this.cam.z) {
+      this._hullsFor = this.cam.x + ',' + this.cam.y + ',' + this.cam.z;
+      this._hulls = this._isoOrder.map((b) => { const z = this._bH(b); const h = convexHull(bCorners(b).flatMap(([px, py]) => [this.S(px, py, 0), this.S(px, py, z)])); const xs = h.map((p) => p[0]), ys = h.map((p) => p[1]); return { h, x0: Math.min(...xs), x1: Math.max(...xs), y0: Math.min(...ys), y1: Math.max(...ys) }; });
+    }
+    const probes = [[x - tw / 2, y], [x, y], [x + tw / 2, y], [x - tw / 4, y - 5], [x + tw / 4, y + 5]];
+    return this._hulls.some((q) => x + tw / 2 >= q.x0 && x - tw / 2 <= q.x1 && y + 6 >= q.y0 && y - 6 <= q.y1 && probes.some(([px, py]) => inPoly(q.h, px, py)));
+  }
+  _drawIsoBuilding(b, hl) {
+    const ctx = this.ctx; const H = this._bH(b); const col = this._bFill(b);
+    const stroke = hl ? PAL.coral : PAL.ink, lw = hl ? 1.6 : 0.5;
+    const cs = bCorners(b);
+    // walls whose outside faces the viewer (toward +x+y)
+    for (let i = 0; i < 4; i++) {
+      const p = cs[i], q = cs[(i + 1) % 4]; const nx = q[1] - p[1], ny = -(q[0] - p[0]);
+      const ccw = ((cs[1][0] - cs[0][0]) * (cs[2][1] - cs[0][1]) - (cs[1][1] - cs[0][1]) * (cs[2][0] - cs[0][0])) > 0;
+      const ox = ccw ? nx : -nx, oy = ccw ? ny : -ny;
+      if (ox + oy <= 0) continue;
+      const light = ox > oy ? 0.82 : 0.93;
+      this._poly([this.S(p[0], p[1], H), this.S(q[0], q[1], H), this.S(q[0], q[1], 0), this.S(p[0], p[1], 0)], shade(col, light), stroke, lw);
+    }
+    const roof = cs.map(([x, y]) => this.S(x, y, H));
+    this._poly(roof, shade(col, 1.04), stroke, lw);
+    // door on the wall facing the square, when that wall is visible
+    const c = Math.cos(b.ang || 0), s = Math.sin(b.ang || 0);
+    if (c + s > 0.2 && this.cam.z * b.d > 8) { const dx = b.x + c * b.w / 2, dy = b.y + s * b.w / 2; const e = 0.12; const p0 = this.S(dx - s * e, dy + c * e, Math.min(H, 0.35)), p1 = this.S(dx + s * e, dy - c * e, Math.min(H, 0.35)), p2 = this.S(dx + s * e, dy - c * e, 0), p3 = this.S(dx - s * e, dy + c * e, 0); this._poly([p0, p1, p2, p3], '#5A3A22'); }
+    // roof marks for landmarks and shared buildings
+    const k = b.landmark ? b.landmark.key : b.special || b.kind;
+    const [tx, ty] = this.S(b.x, b.y, H); const m = Math.min(b.w, b.d) * this.cam.z;
+    if (m < 6) return;
+    ctx.save(); ctx.strokeStyle = PAL.ink; ctx.lineWidth = 0.6;
+    if (k === 'observatory' || k === 'theater' || k === 'square') {
+      const r = m * 0.42; ctx.beginPath(); ctx.ellipse(tx, ty, r, r * 0.5, 0, 0, 7); ctx.fillStyle = PAL.parch; ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(tx, ty, r, Math.PI, 0); ctx.fillStyle = k === 'theater' ? '#C9E0DA' : '#E4F0EE'; ctx.fill(); ctx.stroke();
+      if (k === 'observatory') { ctx.lineWidth = Math.max(1.2, m * 0.06); ctx.beginPath(); ctx.moveTo(tx + r * 0.1, ty - r * 0.95); ctx.lineTo(tx + r * 0.25, ty - r * 0.2); ctx.stroke(); }
+    } else if (k === 'hall') { ctx.beginPath(); ctx.moveTo(tx - m * 0.35, ty); ctx.lineTo(tx + m * 0.35, ty); ctx.lineTo(tx, ty - m * 0.45); ctx.closePath(); ctx.fillStyle = '#C8643B'; ctx.fill(); ctx.stroke(); }
+    else if (k === 'power') { [-0.15, 0.15].forEach((u) => { ctx.fillStyle = '#F3EEE6'; ctx.fillRect(tx + m * u - 2, ty - m * 0.5, 4, m * 0.5); ctx.strokeRect(tx + m * u - 2, ty - m * 0.5, 4, m * 0.5); }); }
+    else if (k === 'water') { ctx.fillStyle = PAL.water; ctx.beginPath(); ctx.ellipse(tx, ty - m * 0.3, m * 0.22, m * 0.1, 0, 0, 7); ctx.fill(); ctx.stroke(); ctx.fillRect(tx - m * 0.22, ty - m * 0.3, m * 0.44, m * 0.25); ctx.strokeRect(tx - m * 0.22, ty - m * 0.3, m * 0.44, m * 0.25); }
+    else if (k === 'dyeworks') { [[-0.2, PAL.coral], [0, PAL.sand], [0.2, PAL.teal]].forEach(([u, cc]) => { ctx.beginPath(); ctx.ellipse(tx + m * u, ty, m * 0.1, m * 0.05, 0, 0, 7); ctx.fillStyle = cc; ctx.fill(); ctx.stroke(); }); }
+    else if (k === 'depot' || k === 'mast' || (b.deco && b.deco.mast)) { ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx, ty - m * 1.1); if (k === 'depot') ctx.lineTo(tx - m * 0.9, ty - m * 0.95); ctx.stroke(); }
+    else if (k === 'windowgate') { ctx.fillStyle = '#fff'; ctx.fillRect(tx - m * 0.25, ty - m * 0.45, m * 0.5, m * 0.35); ctx.strokeRect(tx - m * 0.25, ty - m * 0.45, m * 0.5, m * 0.35); }
+    else if (k === 'exchange') { for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.moveTo(tx + i * m * 0.2, ty - m * 0.05); ctx.lineTo(tx + i * m * 0.2, ty + m * 0.15); ctx.stroke(); } }
+    else if (k === 'studio') { ctx.fillStyle = PAL.ink; ctx.fillRect(tx - m * 0.25, ty - m * 0.1, m * 0.5, m * 0.08); }
+    if (b.deco && b.deco.screen && m > 8) { ctx.fillStyle = '#3E4A4A'; ctx.fillRect(tx - m * 0.18, ty - m * 0.32, m * 0.36, m * 0.2); }
+    ctx.restore();
   }
   _drawClearings(t) {
     const ctx = this.ctx;
     for (const c of t.clearings) {
       const [x, y] = this.S(c.x, c.y); const r = Math.max(5, c.r * 0.55 * this.cam.z);
+      this._poly(this._circleW(c.x, c.y, c.r, 28), PAL.parch, '#C9B79C', 0.8);
       ctx.save(); ctx.strokeStyle = PAL.ink; ctx.fillStyle = PAL.parch; ctx.lineWidth = 0.9;
       if (this.mode === 'iso') { ctx.translate(x, y); ctx.scale(1, 0.62); ctx.translate(-x, -y); }
       const k = c.kind;
@@ -1469,82 +1598,7 @@ class TownView {
   _drawPeople(t) {
     const ctx = this.ctx;
     for (const [vx, vy] of t.visitors) { const [x, y] = this.S(vx, vy); ctx.fillStyle = PAL.coral; ctx.beginPath(); ctx.arc(x, y, Math.max(1.5, this.cam.z * 0.09), 0, 7); ctx.fill(); }
-    for (const id of t.cranes) { const b = t.buildings[id]; const [x, y] = this.S(b.x + b.w, b.y, this.mode === 'iso' ? b.h * this._hz : 0); ctx.save(); ctx.strokeStyle = PAL.coral; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - 12); ctx.lineTo(x - 10, y - 12); ctx.moveTo(x - 8, y - 12); ctx.lineTo(x - 8, y - 6); ctx.stroke(); ctx.restore(); }
-  }
-  _drawLabels(t) {
-    const z = this.cam.z, ctx = this.ctx;
-    ctx.font = '500 11px system-ui, sans-serif';
-    for (const d of t.districts) {
-      const txt = d.label; const tw = ctx.measureText(txt).width;
-      if (this.mode === 'plan') { if (d.w * z < tw + 6 || d.h * z < 14) continue; const [x, y] = this.S(d.x + 0.12, d.y + 0.08); this._text(txt, x + 2, y + 7, { align: 'left', w: 500, color: PAL.labelSoft }); }
-      else { if (d.w * z < 22) continue; const [x, y] = this.S(d.x + d.w / 2, d.y + d.h / 2, 0); this._text(txt, x, y - Math.min(60, (this._hz || 1) * 2 * z * 0.6), { w: 500, color: PAL.label }); }
-    }
-    const placed = [];
-    for (const s of t.streets) {
-      if (!s.label) continue;
-      const [x, y] = this.S(s.label.x, s.label.y); ctx.font = '500 11px system-ui, sans-serif'; const tw = ctx.measureText(s.name).width;
-      const lenPx = s.label.len * z * (this.mode === 'iso' ? 1 : 1);
-      if (lenPx < tw * 0.8) continue;
-      if (placed.some(([px, py]) => Math.abs(px - x) < tw && Math.abs(py - y) < 12)) continue;
-      placed.push([x, y]);
-      ctx.save(); ctx.translate(x, y);
-      if (this.mode === 'plan' && !s.label.horiz) ctx.rotate(-Math.PI / 2);
-      if (this.mode === 'iso') { const a = this.S(0, 0), b = s.label.horiz ? this.S(1, 0) : this.S(0, 1); ctx.rotate(Math.atan2(b[1] - a[1], b[0] - a[0])); }
-      this._text(s.name, 0, 0, { w: 500, color: '#2E2012', size: 11, haloColor: 'rgba(248,240,222,0.95)' });
-      ctx.restore();
-    }
-  }
-
-  /* ---------- isometric ---------- */
-  _drawIso(t) {
-    this._hz = 0.9;
-    this._revealGround(t, true);
-    this._drawRings(t);
-    this._drawRoadsBase(t);
-    this._drawStreets(t);
-    const order = [...t.buildings].sort((a, b) => (a.x + a.w + a.y + a.d) - (b.x + b.w + b.y + b.d) || a.id - b.id);
-    this._isoOrder = order;
-    const hl = this.pinned || this.hover;
-    for (const b of order) this._drawIsoBuilding(b, hl && hl.type === 'building' && hl.b.id === b.id);
-    this._drawClearings(t);
-    this._drawPeople(t);
-    this._drawLabels(t);
-  }
-  _drawIsoBuilding(b, hl) {
-    const ctx = this.ctx; const z = b.h * this._hz; const col = this._bFill(b);
-    const stroke = hl ? PAL.coral : PAL.ink, lw = hl ? 1.6 : 0.5;
-    const flat = ['stake', 'fence', 'plaque', 'trash'].includes(b.kind);
-    const H = flat ? 0.12 : z;
-    const left = [this.S(b.x, b.y + b.d, H), this.S(b.x + b.w, b.y + b.d, H), this.S(b.x + b.w, b.y + b.d, 0), this.S(b.x, b.y + b.d, 0)];
-    const right = [this.S(b.x + b.w, b.y, H), this.S(b.x + b.w, b.y + b.d, H), this.S(b.x + b.w, b.y + b.d, 0), this.S(b.x + b.w, b.y, 0)];
-    const top = this._rectW(b.x, b.y, b.w, b.d, H);
-    const k = b.landmark ? b.landmark.key : b.special || b.kind;
-    if (b.deco && b.deco.tiers > 1 && k !== 'observatory') {
-      const n = Math.min(b.deco.tiers, 10); const step = H / n;
-      for (let i = 0; i < n; i++) { const ins = (i / n) * 0.42 * b.w; const z0 = i * step, z1 = (i + 1) * step;
-        const L = [this.S(b.x + ins, b.y + b.d - ins, z1), this.S(b.x + b.w - ins, b.y + b.d - ins, z1), this.S(b.x + b.w - ins, b.y + b.d - ins, z0), this.S(b.x + ins, b.y + b.d - ins, z0)];
-        const R = [this.S(b.x + b.w - ins, b.y + ins, z1), this.S(b.x + b.w - ins, b.y + b.d - ins, z1), this.S(b.x + b.w - ins, b.y + b.d - ins, z0), this.S(b.x + b.w - ins, b.y + ins, z0)];
-        const c = i === 0 ? '#F2A08C' : col;
-        this._poly(L, shade(c, 0.93), stroke, lw); this._poly(R, shade(c, 0.8), stroke, lw); this._poly(this._rectW(b.x + ins, b.y + ins, b.w - 2 * ins, b.d - 2 * ins, z1), shade(c, 1.03), stroke, lw); }
-    } else {
-      this._poly(left, shade(col, 0.93), stroke, lw); this._poly(right, shade(col, 0.8), stroke, lw); this._poly(top, shade(col, 1.04), stroke, lw);
-    }
-    const [tx, ty] = this.S(b.x + b.w / 2, b.y + b.d / 2, H); const m = b.w * this.cam.z;
-    ctx.save(); ctx.strokeStyle = PAL.ink; ctx.lineWidth = 0.6;
-    if (k === 'observatory' || k === 'theater' || k === 'square') {
-      const r = m * 0.42; ctx.beginPath(); ctx.ellipse(tx, ty, r, r * 0.5, 0, 0, 7); ctx.fillStyle = PAL.parch; ctx.fill(); ctx.stroke();
-      ctx.beginPath(); ctx.arc(tx, ty, r, Math.PI, 0); ctx.fillStyle = k === 'theater' ? '#C9E0DA' : '#E4F0EE'; ctx.fill(); ctx.stroke();
-      if (k === 'observatory') { ctx.lineWidth = Math.max(1.2, m * 0.06); ctx.beginPath(); ctx.moveTo(tx + r * 0.1, ty - r * 0.95); ctx.lineTo(tx + r * 0.25, ty - r * 0.2); ctx.stroke(); }
-    } else if (k === 'hall') { ctx.beginPath(); ctx.moveTo(tx - m * 0.35, ty); ctx.lineTo(tx + m * 0.35, ty); ctx.lineTo(tx, ty - m * 0.45); ctx.closePath(); ctx.fillStyle = '#C8643B'; ctx.fill(); ctx.stroke(); }
-    else if (k === 'power') { [-0.15, 0.15].forEach((u) => { ctx.fillStyle = '#F3EEE6'; ctx.fillRect(tx + m * u - 2, ty - m * 0.5, 4, m * 0.5); ctx.strokeRect(tx + m * u - 2, ty - m * 0.5, 4, m * 0.5); }); }
-    else if (k === 'water') { ctx.fillStyle = PAL.water; ctx.beginPath(); ctx.ellipse(tx, ty - m * 0.3, m * 0.22, m * 0.1, 0, 0, 7); ctx.fill(); ctx.stroke(); ctx.fillRect(tx - m * 0.22, ty - m * 0.3, m * 0.44, m * 0.25); ctx.strokeRect(tx - m * 0.22, ty - m * 0.3, m * 0.44, m * 0.25); }
-    else if (k === 'dyeworks') { [[-0.2, PAL.coral], [0, PAL.sand], [0.2, PAL.teal]].forEach(([u, c]) => { ctx.beginPath(); ctx.ellipse(tx + m * u, ty, m * 0.1, m * 0.05, 0, 0, 7); ctx.fillStyle = c; ctx.fill(); ctx.stroke(); }); }
-    else if (k === 'depot' || k === 'mast' || (b.deco && b.deco.mast)) { ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx, ty - m * 1.1); if (k === 'depot') ctx.lineTo(tx - m * 0.9, ty - m * 0.95); ctx.stroke(); }
-    else if (k === 'windowgate') { ctx.fillStyle = '#fff'; ctx.fillRect(tx - m * 0.25, ty - m * 0.45, m * 0.5, m * 0.35); ctx.strokeRect(tx - m * 0.25, ty - m * 0.45, m * 0.5, m * 0.35); }
-    if (k === 'exchange' && b.deco.doors) { const n = b.deco.doors; for (let i = 0; i < n; i++) { const u = 0.1 + 0.8 * (i + 0.5) / n; const p = this.S(b.x + b.w * u, b.y + b.d, H * 0.35), q = this.S(b.x + b.w * u, b.y + b.d, 0); ctx.strokeStyle = '#7A2E22'; ctx.lineWidth = Math.max(1, m * 0.04); ctx.beginPath(); ctx.moveTo(...p); ctx.lineTo(...q); ctx.stroke(); } }
-    if (b.deco && b.deco.screen && m > 8) { const s = this.S(b.x + b.w * 0.3, b.y + b.d * 0.3, H); ctx.fillStyle = '#3E4A4A'; ctx.fillRect(s[0] - m * 0.18, s[1] - m * 0.24, m * 0.36, m * 0.2); }
-    if (b.deco && b.deco.silo && m > 8) { const s = this.S(b.x + b.w + 0.25, b.y + b.d * 0.7, 0); const r = m * 0.12; ctx.fillStyle = '#CFE3E0'; ctx.fillRect(s[0] - r, s[1] - r * 3, r * 2, r * 3); ctx.strokeRect(s[0] - r, s[1] - r * 3, r * 2, r * 3); ctx.beginPath(); ctx.ellipse(s[0], s[1] - r * 3, r, r * 0.45, 0, 0, 7); ctx.fill(); ctx.stroke(); }
-    ctx.restore();
+    for (const id of t.cranes) { const b = t.buildings[id]; const [x, y] = this.S(b.x, b.y, this.mode === 'iso' ? this._bH(b) : 0); ctx.save(); ctx.strokeStyle = PAL.coral; ctx.lineWidth = 1.2; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x, y - 12); ctx.lineTo(x - 10, y - 12); ctx.moveTo(x - 8, y - 12); ctx.lineTo(x - 8, y - 6); ctx.stroke(); ctx.restore(); }
   }
 
   /* ---------- list towns ---------- */
@@ -1614,39 +1668,91 @@ function worldLinks(owners, towns) {
   return [...links.values()].map((l) => ({ a: l.a, b: l.b, why: [...l.why] }));
 }
 
-function worldIslands(owners, links) {
+/* Islands: the coastline is built from the repos. Walking clockwise from the top, each repo owns a stretch of
+   coast in creation order; a bigger repo pushes out a peninsula, an empty one leaves a bay. More languages make a
+   rougher coast. Stars raise hills. Forks sit offshore on islets joined by sandbars. Owners linked by forks or
+   imports share one island, each holding its own stretch, with borders running inland between them. */
+const COAST_N = 240;
+function worldIslands(owners, links, towns) {
   const ids = Object.keys(owners).sort((a, b) => (owners[a].id || 9e15) - (owners[b].id || 9e15) || a.localeCompare(b));
   const parent = new Map(ids.map((i) => [i, i]));
   const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
   for (const l of links) parent.set(find(l.a), find(l.b));
   const groups = new Map();
   for (const i of ids) { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); }
-  const islands = [...groups.values()].map((members) => {
-    const repos = members.reduce((a, m) => a + Math.max(1, owners[m].repos.length), 0);
-    const name = members.length === 1 ? members[0] + ' Isle' : members.slice().sort((a, b) => owners[b].repos.length - owners[a].repos.length)[0] + ' Archipelago';
-    return { id: members.slice().sort().join('+'), members, repos, name };
-  });
-  // Deterministic placement: shelf rows ordered by oldest member account id (no spiral).
-  islands.sort((a, b) => Math.min(...a.members.map((m) => owners[m].id || 9e15)) - Math.min(...b.members.map((m) => owners[m].id || 9e15)) || a.id.localeCompare(b.id));
-  const rOf = (isl) => 3 + 2.2 * Math.sqrt(isl.repos);
-  const rowW = Math.max(40, Math.sqrt(islands.reduce((a, i) => a + (2 * rOf(i) + 4) ** 2, 0)) * 1.25);
+  const islands = [...groups.values()].map((members) => shapeIsland(members, owners, towns));
+  // shelf rows ordered by the oldest member account (no spiral)
+  const rowW = Math.max(40, Math.sqrt(islands.reduce((a, i) => a + (2 * i.R + 5) ** 2, 0)) * 1.3);
   let x = 0, y = 0, rowH = 0;
   for (const isl of islands) {
-    const r = rOf(isl), R = rng(hashStr(isl.id));
-    if (x + 2 * r > rowW && x > 0) { x = 0; y += rowH + 3; rowH = 0; }
-    isl.r = r; isl.cx = x + r + R() * 2; isl.cy = y + r + R() * 2;
-    const ph = [R() * 6.28, R() * 6.28, R() * 6.28];
-    isl.shape = Array.from({ length: 72 }, (_, k) => { const a = (k / 72) * Math.PI * 2; return 1.02 + 0.07 * Math.sin(2 * a + ph[0]) + 0.05 * Math.sin(3 * a + ph[1]) + 0.03 * Math.sin(5 * a + ph[2]); });
-    x += 2 * r + 4; rowH = Math.max(rowH, 2 * r + 2);
+    const gap = 3 + isl.R * 0.25;
+    if (x + 2 * isl.R > rowW && x > 0) { x = 0; y += rowH + 4; rowH = 0; }
+    isl.cx = x + isl.R; isl.cy = y + isl.R; x += 2 * isl.R + gap; rowH = Math.max(rowH, 2 * isl.R);
   }
   return islands;
 }
 
-function nationRects(isl, owners) {
-  // Treemap of member owners inside the island square, weighted by repo count.
-  const s = isl.r * 1.25;
-  const items = isl.members.map((m) => ({ v: Math.max(1, owners[m].repos.length), login: m })).sort((a, b) => b.v - a.v || a.login.localeCompare(b.login));
-  return squarify(items, isl.cx - s / 2, isl.cy - s / 2, s, s).map((it) => ({ login: it.login, x: it.rect.x, y: it.rect.y, w: it.rect.w, h: it.rect.h }));
+function shapeIsland(members, owners, towns) {
+  const id = members.slice().sort().join('+');
+  const rnd = rng(hashStr(id));
+  const repos = []; const forks = [];
+  for (const m of members) for (const r of owners[m].repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0) || a.name.localeCompare(b.name))) (r.fork ? forks : repos).push({ owner: m, r });
+  if (!repos.length && forks.length) repos.push(forks.shift());
+  const n = Math.max(1, repos.length);
+  const R0 = 3 + 1.25 * Math.sqrt(n);
+  const maxLog = Math.max(1, ...repos.map((x) => Math.log10(1 + (x.r.size || 0))));
+  const langs = new Set(repos.map((x) => x.r.lang).filter(Boolean)).size;
+  repos.forEach((x, i) => {
+    x.th = -Math.PI / 2 + ((i + 0.5) / n) * Math.PI * 2;
+    const sz = Math.log10(1 + (x.r.size || 0)) / maxLog;
+    x.rad = x.r.size ? R0 * (0.62 + 0.75 * sz) : R0 * 0.42;
+    x.town = towns[(x.owner + '/' + x.r.name).toLowerCase()] || null;
+  });
+  // coastline profile: smooth blend of each repo's reach, sampled once
+  const buckets = n > 60 ? Array.from({ length: 60 }, (_, k) => { const part = repos.filter((x, i) => Math.floor((i / n) * 60) === k); return { th: -Math.PI / 2 + ((k + 0.5) / 60) * Math.PI * 2, rad: part.length ? Math.max(...part.map((p) => p.rad)) : R0 * 0.6 }; }) : repos;
+  const kappa = Math.min(150, Math.max(3, buckets.length * 2.4));
+  const ph = [rnd() * 6.28, rnd() * 6.28, rnd() * 6.28];
+  const coast = new Float32Array(COAST_N);
+  for (let k = 0; k < COAST_N; k++) {
+    const th = -Math.PI / 2 + (k / COAST_N) * Math.PI * 2;
+    let num = 0, den = 0; for (const b of buckets) { const w = Math.exp(kappa * (Math.cos(th - b.th) - 1)); num += w * b.rad; den += w; }
+    const rough = 0.012 * Math.min(langs, 12) * (Math.sin(7 * th + ph[0]) + 0.7 * Math.sin(11 * th + ph[1]) + 0.5 * Math.sin(17 * th + ph[2]));
+    coast[k] = (den ? num / den : R0) * (1 + rough);
+  }
+  const coastAt = (th) => { let u = ((th + Math.PI / 2) / (Math.PI * 2)) % 1; if (u < 0) u += 1; const f = u * COAST_N; const i = Math.floor(f) % COAST_N, j = (i + 1) % COAST_N; const t = f - Math.floor(f); return coast[i] * (1 - t) + coast[j] * t; };
+  // plots on their own stretch; crowded coasts stack plots in rows inland
+  const rows = n <= 40 ? 1 : Math.ceil(n / 40);
+  repos.forEach((x, i) => {
+    const row = rows > 1 ? i % rows : 0;
+    const c = coastAt(x.th);
+    const dist = c * (x.r.size ? 0.72 : 0.78) - row * Math.min(c * 0.12, 1.3);
+    const chord = (2 * Math.PI * Math.max(1, dist)) / Math.ceil(n / rows);
+    const want = x.r.size ? 0.55 + 0.35 * (Math.log10(1 + x.r.size) / maxLog) : 0.4;
+    x.half = Math.max(0.12, Math.min(want, chord * 0.38));
+    x.px = Math.cos(x.th) * dist; x.py = Math.sin(x.th) * dist;
+  });
+  // forks offshore, spread evenly around the coast
+  const fShow = forks.slice(0, 36);
+  fShow.forEach((x, j) => {
+    x.th = -Math.PI / 2 + ((j + 0.5) / fShow.length) * Math.PI * 2 + 0.12;
+    const d = coastAt(x.th) * 1.45; x.px = Math.cos(x.th) * d; x.py = Math.sin(x.th) * d; x.half = 0.45;
+    x.town = towns[(x.owner + '/' + x.r.name).toLowerCase()] || null;
+  });
+  // hills behind the most-starred repos
+  const hills = repos.filter((x) => x.r.stars > 0).sort((a, b) => b.r.stars - a.r.stars).slice(0, 12).map((x) => {
+    const c = coastAt(x.th) * 0.72 - 1.25 - x.half; return { x: Math.cos(x.th) * c, y: Math.sin(x.th) * c, levels: Math.min(5, Math.ceil(Math.log2(1 + x.r.stars))) };
+  });
+  // nations: each member holds the arc of its repos; borders run inland between arcs
+  const nations = members.map((m) => {
+    const mine = repos.filter((x) => x.owner === m);
+    const a0 = mine.length ? mine[0].th - Math.PI / n : 0, a1 = mine.length ? mine[mine.length - 1].th + Math.PI / n : 0;
+    return { login: m, a0, a1, mid: (a0 + a1) / 2, count: owners[m].repos.length, type: owners[m].type };
+  });
+  const borders = members.length > 1 ? nations.map((nt) => { const pts = []; for (let k = 0; k <= 10; k++) { const t = k / 10; const r = coastAt(nt.a0) * t; const wob = (rnd() - 0.5) * 0.12 * t; pts.push([Math.cos(nt.a0 + wob) * r, Math.sin(nt.a0 + wob) * r]); } return pts; }) : [];
+  const maxCoast = Math.max(...coast);
+  const R = Math.max(maxCoast * 1.32, fShow.length ? maxCoast * 1.45 + 1.3 : 0) + 1.2;
+  const name = members.length === 1 ? members[0] + ' Isle' : members.slice().sort((a, b) => owners[b].repos.length - owners[a].repos.length)[0] + ' Archipelago';
+  return { id, members, name, repos, forks: fShow, forkMore: forks.length - fShow.length, coast, coastAt, hills, nations, borders, R, R0, langs };
 }
 
 function plotGrid(owner) {
@@ -1654,6 +1760,7 @@ function plotGrid(owner) {
   const n = Math.max(1, repos.length), cols = Math.ceil(Math.sqrt(n * 1.3));
   return { cols, rows: Math.ceil(n / cols), plots: repos.map((r, i) => ({ repo: r, c: i % cols, r: Math.floor(i / cols), n: i + 1 })) };
 }
+const PLOT = 3.4, PLOT_DX = 4, PLOT_DY = 4.9;
 
 /* ---------- view ---------- */
 class WorldView {
@@ -1663,16 +1770,16 @@ class WorldView {
     this.fogPat = makeFogPattern(this.ctx);
     this._bind(); new ResizeObserver(() => this.resize()).observe(canvas);
   }
-  setData(owners, towns) { this.owners = owners; this.towns = towns; this.links = worldLinks(owners, towns); this.islands = worldIslands(owners, this.links); if (this.level.kind !== 'world' && !this._levelValid()) this.level = { kind: 'world' }; this.fit(); }
+  setData(owners, towns) { this.owners = owners; this.towns = towns; this.links = worldLinks(owners, towns); this.islands = worldIslands(owners, this.links, towns); if (this.level.kind !== 'world' && !this._levelValid()) this.level = { kind: 'world' }; this.fit(); }
   _levelValid() { if (this.level.kind === 'nation') return !!this.owners[this.level.login]; if (this.level.kind === 'island') return this.islands.some((i) => i.id === this.level.id); return true; }
   go(level) { this.level = level; this.hover = null; this.fit(); this.app.onWorldLevel(level); }
   islandOf(login) { return this.islands.find((i) => i.members.includes(login)); }
   resize() { const r = this.cv.getBoundingClientRect(), d = window.devicePixelRatio || 1; this.cv.width = Math.max(1, Math.round(r.width * d)); this.cv.height = Math.max(1, Math.round(r.height * d)); this.dpr = d; this.fit(); }
   _box() {
     const L = this.level;
-    if (L.kind === 'world') { if (!this.islands.length) return [0, 0, 40, 30]; const xs = this.islands.flatMap((i) => [i.cx - i.r * 1.3, i.cx + i.r * 1.3]), ys = this.islands.flatMap((i) => [i.cy - i.r * 1.3, i.cy + i.r * 1.6]); return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)]; }
-    if (L.kind === 'island') { const i = this.islands.find((q) => q.id === L.id); return [i.cx - i.r * 1.25, i.cy - i.r * 1.25, i.cx + i.r * 1.25, i.cy + i.r * 1.35]; }
-    const g = plotGrid(this.owners[L.login]); return [-1.2, -2.6, g.cols * 4 + 0.2, g.rows * 4 + 0.6];
+    if (L.kind === 'world') { if (!this.islands.length) return [0, 0, 40, 30]; return [Math.min(...this.islands.map((i) => i.cx - i.R)), Math.min(...this.islands.map((i) => i.cy - i.R)), Math.max(...this.islands.map((i) => i.cx + i.R)), Math.max(...this.islands.map((i) => i.cy + i.R + 1))]; }
+    if (L.kind === 'island') { const i = this.islands.find((q) => q.id === L.id); return [i.cx - i.R, i.cy - i.R, i.cx + i.R, i.cy + i.R + 1]; }
+    const g = plotGrid(this.owners[L.login]); return [-1.2, -2.6, g.cols * PLOT_DX + 0.2, g.rows * PLOT_DY + 0.2];
   }
   fit() {
     if (!this.dpr || !this.owners) return;
@@ -1682,27 +1789,39 @@ class WorldView {
   S(x, y) { const c = this.cam; return [(x - c.x) * c.z + this.cv.width / this.dpr / 2, (y - c.y) * c.z + this.cv.height / this.dpr / 2]; }
   U(sx, sy) { const c = this.cam; return [(sx - this.cv.width / this.dpr / 2) / c.z + c.x, (sy - this.cv.height / this.dpr / 2) / c.z + c.y]; }
   _bind() {
-    const cv = this.cv; let drag = null, moved = false;
-    cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); drag = { x: e.offsetX, y: e.offsetY, cx: this.cam.x, cy: this.cam.y }; moved = false; });
+    const cv = this.cv; let drag = null, moved = false; const pts = new Map(); let pinch = null;
+    cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.offsetX, e.offsetY]); drag = { x: e.offsetX, y: e.offsetY, cx: this.cam.x, cy: this.cam.y }; moved = false; if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), z: this.cam.z }; } });
     cv.addEventListener('pointermove', (e) => {
-      if (drag) { const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 4) moved = true; if (moved) { this.cam.x = drag.cx - dx / this.cam.z; this.cam.y = drag.cy - dy / this.cam.z; this.draw(); } return; }
+      if (pts.has(e.pointerId)) pts.set(e.pointerId, [e.offsetX, e.offsetY]);
+      if (pinch && pts.size === 2) { const [a, b] = [...pts.values()]; this.cam.z = Math.max(0.5, Math.min(300, pinch.z * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d)); moved = true; this.draw(); return; }
+      if (drag && pts.size === 1) { const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 4) moved = true; if (moved) { this.cam.x = drag.cx - dx / this.cam.z; this.cam.y = drag.cy - dy / this.cam.z; this.draw(); } return; }
       const h = this._hit(e.offsetX, e.offsetY); if (JSON.stringify(h) !== JSON.stringify(this.hover)) { this.hover = h; this.draw(); this.app.onWorldHover(h); }
     });
-    cv.addEventListener('pointerup', (e) => { if (drag && !moved) this._click(this._hit(e.offsetX, e.offsetY)); drag = null; });
+    const up = (e) => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (drag && !moved && !pts.size) this._click(this._hit(e.offsetX, e.offsetY)); if (!pts.size) drag = null; };
+    cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
     cv.addEventListener('wheel', (e) => { e.preventDefault(); const k = Math.exp(-e.deltaY * 0.0015); const [wx, wy] = this.U(e.offsetX, e.offsetY); this.cam.z = Math.max(0.5, Math.min(300, this.cam.z * k)); const [nx, ny] = this.U(e.offsetX, e.offsetY); this.cam.x += wx - nx; this.cam.y += wy - ny; this.draw(); }, { passive: false });
+  }
+  _hitIsland(i, x, y) {
+    const dx = x - i.cx, dy = y - i.cy;
+    for (const p of i.repos.concat(i.forks)) if (Math.abs(dx - p.px) <= p.half && Math.abs(dy - p.py) <= p.half) return { kind: 'plot', login: p.owner, repo: p.r.name, island: i.id };
+    const th = Math.atan2(dy, dx), r = Math.hypot(dx, dy);
+    if (r > i.coastAt(th) * 1.05) return null;
+    let login = i.members[0];
+    if (i.members.length > 1) { for (const nt of i.nations) { let a = th; while (a < nt.a0) a += Math.PI * 2; while (a >= nt.a0 + Math.PI * 2) a -= Math.PI * 2; if (a <= nt.a1) { login = nt.login; break; } } }
+    return { kind: this.level.kind === 'island' ? 'nation' : 'island', id: i.id, login };
   }
   _hit(sx, sy) {
     const [x, y] = this.U(sx, sy), L = this.level;
-    if (L.kind === 'world') { for (const i of this.islands) if (Math.hypot(x - i.cx, y - i.cy) < i.r * 1.05) { const n = nationRects(i, this.owners).find((q) => x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h); return { kind: 'island', id: i.id, login: n ? n.login : null }; } return null; }
-    if (L.kind === 'island') { const i = this.islands.find((q) => q.id === L.id); const n = nationRects(i, this.owners).find((q) => x >= q.x && x <= q.x + q.w && y >= q.y && y <= q.y + q.h); return n ? { kind: 'nation', login: n.login } : null; }
-    const g = plotGrid(this.owners[L.login]); const p = g.plots.find((q) => x >= q.c * 4 && x <= q.c * 4 + 3.4 && y >= q.r * 4 && y <= q.r * 4 + 3.4);
+    if (L.kind === 'world') { for (const i of this.islands) { const h = this._hitIsland(i, x, y); if (h) return h; } return null; }
+    if (L.kind === 'island') { const i = this.islands.find((q) => q.id === L.id); return i ? this._hitIsland(i, x, y) : null; }
+    const g = plotGrid(this.owners[L.login]); const p = g.plots.find((q) => x >= q.c * PLOT_DX && x <= q.c * PLOT_DX + PLOT && y >= q.r * PLOT_DY && y <= q.r * PLOT_DY + PLOT);
     return p ? { kind: 'plot', login: L.login, repo: p.repo.name, n: p.n } : null;
   }
   _click(h) {
     if (!h) return;
+    if (h.kind === 'plot') return this.app.openRepo(h.login, h.repo);
     if (h.kind === 'island') { const isl = this.islands.find((i) => i.id === h.id); if (isl.members.length === 1) this.go({ kind: 'nation', login: isl.members[0] }); else this.go({ kind: 'island', id: h.id }); }
     else if (h.kind === 'nation') this.go({ kind: 'nation', login: h.login });
-    else if (h.kind === 'plot') this.app.openRepo(h.login, h.repo);
   }
   zoomBy(k) { this.cam.z = Math.max(0.5, Math.min(300, this.cam.z * k)); this.draw(); }
 
@@ -1713,98 +1832,101 @@ class WorldView {
     const W = this.cv.width / this.dpr, H = this.cv.height / this.dpr;
     ctx.fillStyle = PAL.fog; ctx.fillRect(0, 0, W, H); ctx.fillStyle = this.fogPat; ctx.fillRect(0, 0, W, H);
     if (!this.islands.length) { this._t('No owners charted yet. Scan a repo to reveal its owner.', W / 2, H / 2, { size: 13 }); return; }
-    if (this.level.kind === 'world') this._drawWorld(); else if (this.level.kind === 'island') this._drawIsland(); else this._drawNation();
+    if (this.level.kind === 'nation') return this._drawNation();
+    const list = this.level.kind === 'island' ? this.islands.filter((i) => i.id === this.level.id) : this.islands;
+    for (const i of list) this._drawIsland(i);
   }
-  _t(s, x, y, o = {}) { const c = this.ctx; c.font = `${o.w || 400} ${o.size || 11}px system-ui, -apple-system, sans-serif`; c.textAlign = o.align || 'center'; c.textBaseline = 'middle'; c.lineWidth = 3; c.strokeStyle = 'rgba(243,234,215,0.92)'; c.lineJoin = 'round'; c.strokeText(s, x, y); c.fillStyle = o.color || PAL.label; c.fillText(s, x, y); }
-  _islandPath(i, k = 1) {
+  _t(s, x, y, o = {}) { const c = this.ctx; c.font = `${o.w || 400} ${o.size || 11}px system-ui, -apple-system, sans-serif`; c.textAlign = o.align || 'center'; c.textBaseline = 'middle'; c.lineWidth = 3; c.strokeStyle = o.halo || 'rgba(243,234,215,0.92)'; c.lineJoin = 'round'; c.strokeText(s, x, y); c.fillStyle = o.color || PAL.label; c.fillText(s, x, y); }
+  _coastPath(i, k) {
     const c = this.ctx; c.beginPath();
-    i.shape.forEach((s, j) => { const a = (j / i.shape.length) * Math.PI * 2; const [x, y] = this.S(i.cx + Math.cos(a) * i.r * s * k, i.cy + Math.sin(a) * i.r * s * k); j ? c.lineTo(x, y) : c.moveTo(x, y); });
+    for (let j = 0; j < COAST_N; j++) { const th = -Math.PI / 2 + (j / COAST_N) * Math.PI * 2; const r = i.coast[j] * k; const [x, y] = this.S(i.cx + Math.cos(th) * r, i.cy + Math.sin(th) * r); j ? c.lineTo(x, y) : c.moveTo(x, y); }
     c.closePath();
   }
-  _drawWater(isls) {
-    const c = this.ctx;
-    for (const i of isls) { this._islandPath(i, 1.25); c.fillStyle = PAL.water; c.fill(); }
-    for (const i of isls) { this._islandPath(i, 1.1); c.fillStyle = '#E3ECE8'; c.fill(); }
-  }
-  _drawLinks(filter) {
-    const c = this.ctx; const centers = {};
-    for (const i of this.islands) for (const n of nationRects(i, this.owners)) centers[n.login] = [n.x + n.w / 2, n.y + n.h / 2];
-    for (const l of this.links) {
-      if (filter && !filter(l)) continue;
-      const a = centers[l.a], b = centers[l.b]; if (!a || !b) continue;
-      const p = this.S(...a), q = this.S(...b);
-      c.save(); c.strokeStyle = l.why.includes('fork') ? PAL.coral : PAL.ink; c.lineWidth = 1.6; if (!l.why.includes('import') && !l.why.includes('package')) c.setLineDash([5, 4]);
-      c.beginPath(); c.moveTo(...p); c.lineTo(...q); c.stroke(); c.restore();
+  _drawIsland(i) {
+    const c = this.ctx, z = this.cam.z;
+    // water
+    this._coastPath(i, 1.3); c.fillStyle = PAL.water; c.fill();
+    this._coastPath(i, 1.13); c.fillStyle = '#E3ECE8'; c.fill();
+    // fork islets and sandbars
+    for (const f of i.forks) {
+      const th = f.th, r0 = i.coastAt(th) * 0.98; const [ax, ay] = this.S(i.cx + Math.cos(th) * r0, i.cy + Math.sin(th) * r0), [bx, by] = this.S(i.cx + f.px, i.cy + f.py);
+      c.save(); c.strokeStyle = '#E2D6B8'; c.lineWidth = Math.max(1.5, 0.3 * z); c.setLineDash([4, 3]); c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke(); c.restore();
+      c.beginPath(); c.arc(bx, by, 1.1 * z, 0, 7); c.fillStyle = PAL.water; c.fill();
+      c.beginPath(); c.arc(bx, by, 0.8 * z, 0, 7); c.fillStyle = '#EDE4CC'; c.fill(); c.strokeStyle = PAL.inkSoft; c.lineWidth = 1; c.stroke();
     }
-  }
-  _drawNationsOn(i, labels) {
-    const c = this.ctx; const rects = nationRects(i, this.owners);
-    this._islandPath(i); c.fillStyle = '#E9E1C9'; c.fill();
-    c.save(); this._islandPath(i); c.clip();
-    for (const n of rects) {
-      const o = this.owners[n.login]; const hov = this.hover && this.hover.login === n.login;
-      const p = [this.S(n.x, n.y), this.S(n.x + n.w, n.y + n.h)];
-      c.fillStyle = hov ? '#FBF3E2' : PAL.parch; c.fillRect(p[0][0], p[0][1], p[1][0] - p[0][0], p[1][1] - p[0][1]);
-      // land-grant plots inside each nation, scanned ones inked in
-      const g = plotGrid(o); const cw = n.w / g.cols, ch = n.h / Math.max(1, g.rows);
-      for (const pl of g.plots) {
-        const scanned = !!this.towns[(n.login + '/' + pl.repo.name).toLowerCase()];
-        const [x, y] = this.S(n.x + pl.c * cw + cw * 0.15, n.y + pl.r * ch + ch * 0.15);
-        const w = cw * 0.7 * this.cam.z, h = ch * 0.7 * this.cam.z;
-        c.fillStyle = scanned ? langColor(this.towns[(n.login + '/' + pl.repo.name).toLowerCase()].domLang || 'other') : '#E7DECB';
-        c.fillRect(x, y, w, h); if (scanned) { c.strokeStyle = PAL.ink; c.lineWidth = 0.8; c.strokeRect(x, y, w, h); }
-      }
-      c.strokeStyle = PAL.ink; c.lineWidth = o.type === 'Organization' ? 3 : 1; if (o.type !== 'Organization') c.setLineDash([4, 3]);
-      c.strokeRect(p[0][0], p[0][1], p[1][0] - p[0][0], p[1][1] - p[0][1]); c.setLineDash([]);
+    // land
+    this._coastPath(i, 1); c.fillStyle = '#EDE4CC'; c.fill(); c.strokeStyle = PAL.inkSoft; c.lineWidth = 1.5; c.stroke();
+    // borders between nations on a shared island
+    for (const b of i.borders) { c.save(); c.strokeStyle = PAL.ink; c.lineWidth = 1.2; c.setLineDash([5, 3]); c.beginPath(); b.forEach(([x, y], k) => { const [sx, sy] = this.S(i.cx + x, i.cy + y); k ? c.lineTo(sx, sy) : c.moveTo(sx, sy); }); c.stroke(); c.restore(); }
+    // hills from stars
+    for (const h of i.hills) { const [x, y] = this.S(i.cx + h.x, i.cy + h.y); for (let k = h.levels; k >= 1; k--) { c.beginPath(); c.arc(x, y, (0.18 + 0.2 * k) * z, 0, 7); if (k === 1) { c.fillStyle = '#DCCBA2'; c.fill(); } c.strokeStyle = '#B89A68'; c.lineWidth = 1; c.stroke(); } }
+    // plots
+    const hov = this.hover;
+    for (const p of i.repos.concat(i.forks)) {
+      const [x, y] = this.S(i.cx + p.px - p.half, i.cy + p.py - p.half); const w = 2 * p.half * z;
+      const isHov = hov && hov.kind === 'plot' && hov.repo === p.r.name && hov.login === p.owner;
+      if (p.town) {
+        c.fillStyle = '#F8F2E4'; c.fillRect(x, y, w, w);
+        if (w > 40 && !p.town.stub && p.town.v >= 2) this._miniTown(p.town, x, y, w);
+        else this._dots(p, x, y, w);
+        c.strokeStyle = isHov ? PAL.coral : PAL.ink; c.lineWidth = isHov ? 2.2 : 1; c.strokeRect(x, y, w, w);
+      } else if (!p.r.size) { c.save(); c.setLineDash([3, 3]); c.strokeStyle = isHov ? PAL.coral : PAL.inkSoft; c.lineWidth = isHov ? 2 : 1; c.strokeRect(x, y, w, w); c.restore(); }
+      else { c.save(); c.translate(x % 8, y % 8); c.fillStyle = this.fogPat; c.fillRect(x - x % 8, y - y % 8, w, w); c.restore(); c.strokeStyle = isHov ? PAL.coral : PAL.inkSoft; c.lineWidth = isHov ? 2 : 1; c.strokeRect(x, y, w, w); }
     }
-    c.restore();
-    this._islandPath(i); c.strokeStyle = PAL.inkSoft; c.lineWidth = 1.2; c.stroke();
-    if (labels) for (const n of rects) { const [x, y] = this.S(n.x + n.w / 2, n.y + n.h / 2); if (n.w * this.cam.z > 50) this._t(n.login, x, y, { w: 600, size: 12 }); }
-  }
-  _drawWorld() {
-    this._drawWater(this.islands); this._drawLinks();
-    for (const i of this.islands) {
-      this._drawNationsOn(i, true);
-      const [x, y] = this.S(i.cx, i.cy + i.r * 1.32); this._t(i.name, x, y, { color: PAL.labelSoft, size: 11 });
+    // repo names around the coast once there is room
+    const step = (2 * Math.PI * i.R0 * z) / Math.max(1, i.repos.length);
+    const screenR = i.R0 * z; const zoomedIn = this.level.kind === 'island' || screenR > 140;
+    if (zoomedIn && step > 26) for (const p of i.repos) {
+      const r = i.coastAt(p.th) + 0.7; const [x, y] = this.S(i.cx + Math.cos(p.th) * r, i.cy + Math.sin(p.th) * r);
+      const align = Math.abs(Math.cos(p.th)) < 0.3 ? 'center' : Math.cos(p.th) > 0 ? 'left' : 'right';
+      const nm = p.r.name.length > 22 ? p.r.name.slice(0, 21) + '…' : p.r.name;
+      this._t(nm, x, y, { size: 11, align, halo: 'rgba(214,227,225,0.95)' });
     }
+    if (zoomedIn && step > 26) for (const f of i.forks) { const [x, y] = this.S(i.cx + f.px, i.cy + f.py + 1.05); const nm = f.r.name.length > 18 ? f.r.name.slice(0, 17) + '…' : f.r.name; this._t(nm + ' (fork)', x, y, { size: 10, halo: 'rgba(214,227,225,0.95)' }); }
+    // nation names
+    if (screenR < 18 && this.level.kind === 'world') return; // too small for names; hover shows them
+    if (i.members.length === 1) { const [x, y] = this.S(i.cx, i.cy); this._t(i.members[0], x, y, { w: 700, size: Math.max(11, Math.min(18, i.R0 * z * 0.18)) }); }
+    else for (const nt of i.nations) { const r = i.coastAt(nt.mid) * 0.42; const [x, y] = this.S(i.cx + Math.cos(nt.mid) * r, i.cy + Math.sin(nt.mid) * r); this._t(nt.login, x, y, { w: 700, size: 12 }); }
+    if (screenR < 34 && this.level.kind === 'world') return;
+    const [lx, ly] = this.S(i.cx, i.cy + i.R - 0.4); this._t(i.name + (i.forkMore > 0 ? ` · +${i.forkMore} more forks` : ''), lx, ly, { color: PAL.labelSoft, size: 11 });
   }
-  _drawIsland() {
-    const i = this.islands.find((q) => q.id === this.level.id);
-    this._drawWater([i]); this._drawLinks((l) => i.members.includes(l.a) && i.members.includes(l.b));
-    this._drawNationsOn(i, true);
-    const [x, y] = this.S(i.cx, i.cy + i.r * 1.32); this._t(i.name, x, y, { color: PAL.labelSoft, size: 12, w: 600 });
+  _dots(p, x, y, w) {
+    const c = this.ctx; const col = langColor(p.town.domLang || 'other'); const rg = rng(hashStr(p.r.name)); const nb = Math.min(9, 2 + Math.round((p.town.files || (p.town.buildings ? p.town.buildings.length : 6)) / 4));
+    for (let k = 0; k < nb; k++) { const bw = w * (0.14 + rg() * 0.14); c.fillStyle = col; c.strokeStyle = PAL.ink; c.lineWidth = 0.5; const bx = x + w * 0.1 + rg() * (w * 0.8 - bw), by = y + w * 0.1 + rg() * (w * 0.8 - bw); c.fillRect(bx, by, bw, bw); if (w > 14) c.strokeRect(bx, by, bw, bw); }
   }
   _drawNation() {
     const c = this.ctx, login = this.level.login, o = this.owners[login], g = plotGrid(o);
-    const [bx0, by0] = this.S(-0.6, -0.6), [bx1, by1] = this.S(g.cols * 4 - 0.0, g.rows * 4 - 0.0);
+    const [bx0, by0] = this.S(-0.6, -0.6), [bx1, by1] = this.S(g.cols * PLOT_DX, g.rows * PLOT_DY - 0.5);
     c.fillStyle = PAL.parch; c.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
     c.strokeStyle = PAL.ink; c.lineWidth = o.type === 'Organization' ? 3 : 1.2; if (o.type !== 'Organization') c.setLineDash([5, 4]); c.strokeRect(bx0, by0, bx1 - bx0, by1 - by0); c.setLineDash([]);
-    const [tx, ty] = this.S((g.cols * 4 - 0.6) / 2, -1.6);
+    const [tx, ty] = this.S((g.cols * PLOT_DX - 0.6) / 2, -1.6);
     this._t(`${login} · ${o.type === 'Organization' ? 'organization (walled)' : 'user'} · ${o.repos.length} plot${o.repos.length === 1 ? '' : 's'}${o.created ? ' · charted ' + o.created.slice(0, 10) : ''}`, tx, ty, { w: 600, size: 13 });
     for (const p of g.plots) {
-      const x = p.c * 4, y = p.r * 4, key = (login + '/' + p.repo.name).toLowerCase(), t = this.towns[key];
-      const [sx, sy] = this.S(x, y), s = 3.4 * this.cam.z; const hov = this.hover && this.hover.repo === p.repo.name;
-      if (t) {
-        c.fillStyle = '#FBF5E8'; c.fillRect(sx, sy, s, s);
-        this._miniTown(t, sx, sy, s);
-      } else {
-        c.fillStyle = this.fogPat; c.save(); c.translate(sx % 8, sy % 8); c.fillRect(sx - sx % 8, sy - sy % 8, s, s); c.restore();
-        if (s > 60) this._t(p.repo.size === 0 ? 'empty plot' : 'fogged · click to scan', sx + s / 2, sy + s / 2, { size: 10, color: PAL.labelSoft });
-      }
+      const x = p.c * PLOT_DX, y = p.r * PLOT_DY, t = this.towns[(login + '/' + p.repo.name).toLowerCase()];
+      const [sx, sy] = this.S(x, y), s = PLOT * this.cam.z; const hov = this.hover && this.hover.repo === p.repo.name;
+      if (t) { c.fillStyle = '#FBF5E8'; c.fillRect(sx, sy, s, s); if (!t.stub && t.v >= 2) this._miniTown(t, sx, sy, s); else this._dots({ r: p.repo, town: t }, sx, sy, s); }
+      else { c.save(); c.translate(sx % 8, sy % 8); c.fillStyle = this.fogPat; c.fillRect(sx - sx % 8, sy - sy % 8, s, s); c.restore(); if (s > 60) this._t(p.repo.size === 0 ? 'empty plot' : 'fogged · tap to scan', sx + s / 2, sy + s / 2, { size: 10, color: PAL.labelSoft }); }
       c.strokeStyle = hov ? PAL.coral : PAL.ink; c.lineWidth = hov ? 2.5 : 0.9; c.strokeRect(sx, sy, s, s);
-      if (s > 40) { this._t(`#${p.n}`, sx + 4, sy + 9, { align: 'left', size: 9, color: PAL.labelSoft }); this._t(p.repo.name, sx + s / 2, sy + s + 10, { size: s > 110 ? 12 : 10, w: 500 }); }
+      if (s > 40) {
+        this._t(`#${p.n}`, sx + 4, sy + 9, { align: 'left', size: 9, color: PAL.labelSoft });
+        c.font = `500 ${s > 110 ? 12 : 10}px system-ui, sans-serif`; let nm = p.repo.name; while (nm.length > 3 && c.measureText(nm).width > s + PLOT_DX * this.cam.z * 0.15) nm = nm.slice(0, -2);
+        if (nm !== p.repo.name) nm = nm.slice(0, -1) + '…';
+        this._t(nm, sx + s / 2, sy + s + Math.min(14, (PLOT_DY - PLOT) * this.cam.z * 0.45), { size: s > 110 ? 12 : 10, w: 500 });
+      }
     }
   }
+  // a small copy of a grown town that fills its plot
   _miniTown(t, sx, sy, s) {
-    const c = this.ctx;
-    if (t.stub) { c.fillStyle = langColor(t.domLang || 'other'); c.fillRect(sx + s * 0.1, sy + s * 0.1, s * 0.8, s * 0.8); return; }
-    const k = (s * 0.86) / Math.max(t.W, t.H); const ox = sx + (s - t.W * k) / 2, oy = sy + (s - t.H * k) / 2;
-    c.fillStyle = PAL.road; c.fillRect(ox, oy, t.W * k, t.H * k);
-    if (t.mode === 'list') { for (const b of t.buildings) { c.fillStyle = b.kind === 'link-video' ? PAL.coral : b.kind === 'link-repo' ? PAL.teal : '#E9D3A8'; c.fillRect(ox + b.x * k, oy + b.y * k, Math.max(0.6, b.w * k), Math.max(0.6, b.d * k)); } return; }
-    for (const d of t.districts) { c.fillStyle = PAL.block; c.fillRect(ox + d.x * k, oy + d.y * k, d.w * k, d.h * k); }
-    for (const b of t.buildings) { c.fillStyle = langColor(b.lang); c.fillRect(ox + b.x * k, oy + b.y * k, Math.max(0.6, b.w * k), Math.max(0.6, b.d * k)); }
-    c.strokeStyle = PAL.streetCase; c.lineWidth = 0.8;
-    for (const sg of t.segs) { c.beginPath(); c.moveTo(ox + sg.a[0] * k, oy + sg.a[1] * k); c.lineTo(ox + sg.b[0] * k, oy + sg.b[1] * k); c.stroke(); }
+    const c = this.ctx; const cb = t.core || t.bounds; const k = (s * 0.9) / Math.max(cb.x1 - cb.x0, cb.y1 - cb.y0);
+    const ox = sx + (s - (cb.x1 - cb.x0) * k) / 2 - cb.x0 * k, oy = sy + (s - (cb.y1 - cb.y0) * k) / 2 - cb.y0 * k;
+    c.save(); c.beginPath(); c.rect(sx, sy, s, s); c.clip();
+    if (t.mode === 'list') { for (const b of t.buildings) { c.fillStyle = b.kind === 'link-video' ? PAL.coral : b.kind === 'link-repo' ? PAL.teal : '#E9D3A8'; c.fillRect(ox + b.x * k, oy + b.y * k, Math.max(0.6, b.w * k), Math.max(0.6, b.d * k)); } c.restore(); return; }
+    c.beginPath(); for (const b of t.buildings) { c.moveTo(ox + b.x * k + (b.r + 1.4) * k, oy + b.y * k); c.arc(ox + b.x * k, oy + b.y * k, (b.r + 1.4) * k, 0, 7); } c.fillStyle = PAL.land; c.fill();
+    c.beginPath(); for (const b of t.buildings) { c.moveTo(ox + b.x * k + (b.r + 0.5) * k, oy + b.y * k); c.arc(ox + b.x * k, oy + b.y * k, (b.r + 0.5) * k, 0, 7); } c.fillStyle = PAL.block; c.fill();
+    c.strokeStyle = PAL.streetCase; c.lineCap = 'round';
+    for (const st of t.streets) { c.lineWidth = Math.max(0.6, st.w * k * 0.6); c.beginPath(); st.pts.forEach(([x, y], i) => (i ? c.lineTo(ox + x * k, oy + y * k) : c.moveTo(ox + x * k, oy + y * k))); c.stroke(); }
+    for (const b of t.buildings) { c.save(); c.translate(ox + b.x * k, oy + b.y * k); c.rotate(b.ang || 0); const bw = Math.max(1.6, b.w * k), bd = Math.max(1.6, b.d * k); c.fillStyle = langColor(b.lang); c.fillRect(-bw / 2, -bd / 2, bw, bd); if (bw > 4) { c.strokeStyle = PAL.ink; c.lineWidth = 0.6; c.strokeRect(-bw / 2, -bd / 2, bw, bd); } c.restore(); }
+    c.restore();
   }
 }
 
@@ -1829,7 +1951,8 @@ class WorldView {
     for (const o of Object.values(ix.owners || {})) { const cur = state.owners[o.login]; if (!cur || (o.scannedAt || 0) >= (cur.scannedAt || 0)) state.owners[o.login] = o; }
     for (const [k, e] of Object.entries(ix.towns || {})) {
       const cur = state.towns[k];
-      if (cur && !cur.stub && (cur.builtAt || 0) >= (e.builtAt || 0)) { cur.public = true; continue; }
+      const curNew = cur && !cur.stub && (cur.v >= 2 || e.layout !== 2);
+      if (curNew && (cur.builtAt || 0) >= (e.builtAt || 0)) { cur.public = true; continue; }
       state.towns[k] = stubOf(e);
     }
   }
@@ -1878,6 +2001,8 @@ class WorldView {
   }
   function setMode(m) { state.mode = m; $('#mode-plan').setAttribute('aria-pressed', m === 'plan'); $('#mode-iso').setAttribute('aria-pressed', m === 'iso'); townView.setMode(m); }
   function showTown(t) {
+    // towns from the old rectangle layout ask the map bot to rebuild them
+    if (t.mode === 'code' && !(t.v >= 2) && !t._rebuildAsked) { t._rebuildAsked = true; sendToMap(t.key, null); }
     state.current = t; setTab('town'); townView.setTown(t); renderSummary(t);
     $('#q').value = t.key; history.replaceState(null, '', '#' + t.key);
   }
@@ -1902,7 +2027,8 @@ class WorldView {
   const RELAY = window.GH_WORKER_URL || '';
   async function sendToMap(target, t) {
     if (!RELAY) return false;
-    if (t && t.public && t.builtAt && Date.now() - t.builtAt < 7 * 864e5) return false; // already fresh on the map
+    const pub = state.publicIndex && state.publicIndex.towns[String(target).toLowerCase()];
+    if (pub && pub.layout === 2 && Date.now() - (pub.builtAt || 0) < 7 * 864e5) return false; // already fresh on the map
     try {
       const r = await fetch(RELAY.replace(/\/$/, '') + '/request', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ target }) });
       if (r.ok && t) { t.queued = Date.now(); if (state.current === t) renderSummary(t); }
@@ -1970,6 +2096,7 @@ class WorldView {
       html += `<h3>Grid</h3><p class="muted">Rows are topics and columns are languages. Each house is one link: coral for video, green for a code repo, sand for an article.</p>
         <ul class="list">${t.grid.cols.slice(0, 12).map((c) => `<li><span>${esc(c.name)}</span><b>${c.n}</b></li>`).join('')}</ul>`;
     }
+    if (t.mode === 'code' && t.order != null) html += `<h3>Street plan</h3><p class="muted">${t.order > 0.6 ? 'Planned grid' : t.order > 0.3 ? 'Partly planned' : 'Winding old town'} (order ${t.order.toFixed(2)}). Even folder depths and file sizes make a grid; uneven ones make winding streets.</p>`;
     html += `<h3>History</h3><p class="muted">${t.rings} ring${t.rings === 1 ? '' : 's'} of growth (commits), ${t.visitors.length} visitor${t.visitors.length === 1 ? '' : 's'} (stars), ${t.cranes.length} crane${t.cranes.length === 1 ? '' : 's'} (open issues)${s.created ? `, founded ${esc(s.created.slice(0, 10))}` : ''}.</p>`;
     if (t.notes && t.notes.length) html += `<p class="note">${t.notes.map(esc).join('<br>')}</p>`;
     $('#summary').innerHTML = html;
@@ -2023,7 +2150,8 @@ class WorldView {
   function renderWorldHover(hh) {
     const el = $('#inspector'); if (!hh) { el.innerHTML = '<p class="muted">Hover an island, nation or plot.</p>'; return; }
     if (hh.kind === 'plot') { const o = state.owners[hh.login]; const r = o.repos.find((x) => x.name === hh.repo); const t = state.towns[(hh.login + '/' + hh.repo).toLowerCase()];
-      el.innerHTML = `<h4>${esc(hh.repo)}</h4><p>Plot #${hh.n}${r.created ? ' · granted ' + esc(r.created.slice(0, 10)) : ''}</p><p>${t ? `<b>${esc(t.archetype.name)}</b>` : r.size === 0 ? 'Empty plot' : 'Fogged. Tap to scan and build.'}</p>${r.lang ? `<p class="muted">${esc(r.lang)}${r.stars ? ' · ' + fmt(r.stars) + ' stars' : ''}</p>` : ''}`; }
+      const n = hh.n || (o.repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0)).indexOf(r) + 1);
+      el.innerHTML = `<h4>${esc(hh.repo)}</h4><p>${esc(hh.login)} · plot #${n}${r.created ? ' · granted ' + esc(r.created.slice(0, 10)) : ''}</p><p>${t ? `<b>${esc(t.archetype.name)}</b>` : r.size === 0 ? 'Empty plot' : 'Fogged. Tap to scan and build.'}</p>${r.lang ? `<p class="muted">${esc(r.lang)}${r.stars ? ' · ' + fmt(r.stars) + ' stars' : ''}</p>` : ''}`; }
     else { const login = hh.login; const o = login && state.owners[login]; el.innerHTML = o ? `<h4>${esc(login)}</h4><p>${o.type === 'Organization' ? 'Organization' : 'User'} · ${o.repos.length} plots</p>` : ''; }
   }
 
