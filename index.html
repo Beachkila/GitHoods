@@ -77,6 +77,7 @@ body[data-tab="world"] .find-wrap{display:none}
 .route em{font-style:normal;color:var(--accent);font-size:12px}
 #inspector{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:12px;background:var(--bg);min-height:62px}
 #inspector p{margin:2px 0}
+#inspector:empty{display:none}
 aside a{color:var(--accent)} aside a.btn{color:#fff}
 .shelf-wrap{padding:6px 16px 10px;border-top:1px solid var(--line);background:var(--panel);display:flex;gap:8px;align-items:center;overflow-x:auto}
 .shelf-wrap b{font-size:12px;color:var(--soft);white-space:nowrap}
@@ -148,7 +149,7 @@ body[data-view="3d"] #town-canvas{display:none} body[data-tab="world"] #town-3d{
   </div>
   <aside><div class="find-wrap"><input id="find" type="search" placeholder="Find a file or function in this town" aria-label="Find a file" autocomplete="off" spellcheck="false"><div id="find-bar" class="find-bar" hidden><span id="find-count"></span><button id="find-prev" type="button" aria-label="Previous match">‹</button><button id="find-next" type="button" aria-label="Next match">›</button><button id="find-clear" type="button">Clear</button></div><ul id="find-results" class="list"></ul></div><div id="inspector"></div><div id="summary"></div></aside>
 </main>
-<div class="shelf-wrap"><b>On the map · <span id="shelf-count"></span></b><div id="shelf"></div></div>
+<div class="shelf-wrap"><b>On the map · <span id="shelf-count"></span></b></div>
 <dialog id="legend" aria-label="Map key"><form method="dialog"><div class="legend-head"><h3>Map key</h3><button class="ghost" value="close" aria-label="Close">✕</button></div><div id="legend-body"></div></form></dialog>
 <dialog id="settings"><form method="dialog">
   <h3 style="margin-top:0">Settings</h3>
@@ -2987,25 +2988,25 @@ class WorldView {
       : req ? `<p class="pub local">Only in your browser. <a class="btn small" href="${esc(req)}" target="_blank" rel="noopener">Add to public map</a></p><p class="muted small">Opens a GitHub issue. The map bot rebuilds the town from GitHub and adds it for everyone.</p>` : `<p class="pub local">Only in your browser.</p>`;
     if (t.mode === 'code' && t.route && t.route.length > 1) {
       const verb = { start: 'Starts here', imports: 'imports', loads: 'loads', serves: 'serves' };
-      html += `<h3>Main route <small>from the entry file, following what it uses most</small></h3>
+      html += `<h3>Main route</h3>
         <button class="btn small" id="route-toggle">${tv().showRoute ? 'Hide route' : 'Show route on map'}</button>
         <ol class="route">${t.route.map((st, i) => { const b = t.buildings[st.id]; const par = st.from != null ? basename(t.buildings[st.from].path) : ''; return `<li style="margin-left:${Math.min(st.depth, 4) * 12}px"><button class="link" data-step="${i}">${esc(basename(b.path))}</button> <span class="muted">${st.from == null ? verb.start : `${par} ${verb[st.how] || st.how} it`}</span>${st.libs.length ? `<br><em>uses ${st.libs.map(esc).join(', ')}</em>` : ''}${b.info && b.info.doc ? `<br><span class="muted small">${esc(b.info.doc.slice(0, 110))}${b.info.doc.length > 110 ? '…' : ''}</span>` : ''}</li>`; }).join('')}</ol>`;
     }
     if (t.mode === 'code') {
-      html += `<h3>${t.v >= LAYOUT ? 'Roads <small>only between districts that import from each other; named for the file they carry most, or where they lead; width = imports</small>' : 'Streets <small>named for where they lead, or where they start when several meet at one square; width = import traffic</small>'}</h3><ul class="list">${t.streets.filter((st) => !st.empty).slice(0, 10).map((st) => `<li><span title="${esc((st.carries || []).map((c) => c.path).join(', '))}">${esc(st.name)}${(st.carries || []).length ? ` <em>${esc(st.carries.map((c) => basename(c.path)).join(', '))}</em>` : ''}</span><b>${st.traffic}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
-        <h3>${t.v >= LAYOUT ? 'Terminals <small>outside libraries, at the end of the road from the district that uses them most</small>' : 'Outside the walls <small>external libraries, nearest the district that uses them</small>'}</h3><ul class="list">${t.clearings.map((c) => `<li><span>${esc(c.name)}${c.label ? ` <em>${esc(c.label)}</em>` : ''}${c.trail ? ' <em>build trail</em>' : ''}</span><b>${c.uses}</b></li>`).join('') || '<li class="muted">None.</li>'}</ul>`;
+      html += `<h3>${t.v >= LAYOUT ? 'Roads' : 'Streets'}</h3><ul class="list">${t.streets.filter((st) => !st.empty).slice(0, 10).map((st) => `<li><span title="${esc((st.carries || []).map((c) => c.path).join(', '))}">${esc(st.name)}${(st.carries || []).length ? ` <em>${esc(st.carries.map((c) => basename(c.path)).join(', '))}</em>` : ''}</span><b>${st.traffic}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
+        <h3>${t.v >= LAYOUT ? 'Terminals' : 'Outside the walls'}</h3><ul class="list">${t.clearings.map((c) => `<li><span>${esc(c.name)}${c.label ? ` <em>${esc(c.label)}</em>` : ''}${c.trail ? ' <em>build trail</em>' : ''}</span><b>${c.uses}</b></li>`).join('') || '<li class="muted">None.</li>'}</ul>`;
     } else {
-      html += `<h3>Grid</h3><p class="muted">Rows are topics and columns are languages. Each house is one link: coral for video, green for a code repo, sand for an article.</p>
+      html += `<h3>Grid</h3>
         <ul class="list">${t.grid.cols.slice(0, 12).map((c) => `<li><span>${esc(c.name)}</span><b>${c.n}</b></li>`).join('')}</ul>`;
     }
     if (t.mode === 'code' && t.order != null && !(t.v >= LAYOUT)) html += `<h3>Street plan</h3><p class="muted">${t.order > 0.6 ? 'Planned grid' : t.order > 0.3 ? 'Partly planned' : 'Winding old town'} (order ${t.order.toFixed(2)}). Even folder depths and file sizes make a grid; uneven ones make winding streets.</p>`;
     html += `<h3>History</h3><p class="muted">${t.rings} ring${t.rings === 1 ? '' : 's'} of growth (commits), ${t.visitors.length} visitor${t.visitors.length === 1 ? '' : 's'} (stars), ${t.cranes.length} crane${t.cranes.length === 1 ? '' : 's'} (open issues)${s.created ? `, founded ${esc(s.created.slice(0, 10))}` : ''}.</p>`;
     if (t.notes && t.notes.length) html += `<p class="note">${t.notes.map(esc).join('<br>')}</p>`;
     $('#summary').innerHTML = html;
-    if (!tv().pinned) $('#inspector').innerHTML = '<p class="muted">Tap a building, district or terminal.</p>';
+    if (!tv().pinned) $('#inspector').innerHTML = '';
   }
   function renderInspector(hit, pinned) {
-    const el = $('#inspector'); if (!hit) { el.innerHTML = '<p class="muted">Hover or tap a building, district or clearing.</p>'; return; }
+    const el = $('#inspector'); if (!hit) { el.innerHTML = ''; return; }
     const t = state.current; let h = '';
     if (hit.type === 'building') {
       const b = hit.b;
@@ -3034,7 +3035,7 @@ class WorldView {
     } else if (hit.type === 'clearing') {
       const c = hit.c; h = `<h4>${esc(c.name)}</h4><p><b>${c.label ? esc(c.label) : 'Outside library'}</b>${c.std ? ' · standard library' : ''}${c.trail ? ' · build or dev only' : ''}</p><p>${c.uses} import${c.uses === 1 ? '' : 's'} from this town.</p>`;
     }
-    el.innerHTML = h + (pinned ? '<p class="muted">Pinned. Tap empty ground to release.</p>' : '');
+    el.innerHTML = h;
   }
   function renderCrumbs() {
     const L = worldView.level, el = $('#crumbs'); const parts = [`<button data-go="world">World</button>`];
@@ -3050,20 +3051,19 @@ class WorldView {
       const ls = links.filter((l) => l.a === o.login || l.b === o.login);
       h = `<h2><a href="https://github.com/${esc(o.login)}" target="_blank" rel="noopener">${esc(o.login)}</a></h2><p class="arch"><b>${o.type === 'Organization' ? 'Walled nation (organization)' : 'Nation (user)'}</b></p>
         <dl class="stats"><div><dt>Plots</dt><dd>${o.repos.length}</dd></div><div><dt>Towns built</dt><dd>${scanned}</dd></div><div><dt>Stars</dt><dd>${fmt(o.repos.reduce((a, r) => a + (r.stars || 0), 0))}</dd></div></dl>
-        <p class="muted">Plots are granted left to right in the order the repos were created. Fogged plots have not been scanned; tap one to build its town.</p>
         <h3>Plots</h3><ul class="list">${o.repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0)).map((r, i) => `<li><button class="link" data-open="${esc(o.login)}/${esc(r.name)}">#${i + 1} ${esc(r.name)}</button><b>${state.towns[(o.login + '/' + r.name).toLowerCase()] ? 'town' : r.fork ? 'fork' : ''}</b></li>`).join('')}</ul>
         ${ls.length ? `<h3>Infrastructure</h3><ul class="list">${ls.map((l) => `<li><span>${esc(l.a === o.login ? l.b : l.a)}</span><b>${esc(l.why.join(', '))}</b></li>`).join('')}</ul>` : ''}`;
     } else {
-      h = `<h2>The world</h2><p class="muted">Each owner is a nation. Owners linked by forks or imports share an island; unlinked owners sit on their own isle. Inside each nation, small squares are repo plots in creation order, inked once a town is built. Everything not yet scanned stays in fog.</p>
+      h = `<h2>The world</h2>
         <dl class="stats"><div><dt>Nations</dt><dd>${owners.length}</dd></div><div><dt>Islands</dt><dd>${(worldView.islands || []).length}</dd></div><div><dt>Towns</dt><dd>${Object.keys(state.towns).length}</dd></div></dl>
         <h3>Recently built</h3><ul class="list">${Object.values(state.towns).sort((a, b) => (b.builtAt || 0) - (a.builtAt || 0)).slice(0, 12).map((t) => `<li><button class="link" data-town="${esc(t.key.toLowerCase())}">${esc(t.key)}</button><b>${esc(t.archetype ? t.archetype.name : '')}</b></li>`).join('')}</ul>
         <h3>Nations</h3><ul class="list">${owners.map((o) => `<li><button class="link" data-nation="${esc(o.login)}">${esc(o.login)}</button><b>${o.repos.length}</b></li>`).join('')}</ul>
         ${links.length ? `<h3>Infrastructure</h3><ul class="list">${links.map((l) => `<li><span>${esc(l.a)} ↔ ${esc(l.b)}</span><b>${esc(l.why.join(', '))}</b></li>`).join('')}</ul>` : ''}`;
     }
-    $('#summary').innerHTML = h; $('#inspector').innerHTML = '<p class="muted">Hover an island, nation or plot.</p>';
+    $('#summary').innerHTML = h; $('#inspector').innerHTML = '';
   }
   function renderWorldHover(hh) {
-    const el = $('#inspector'); if (!hh) { el.innerHTML = '<p class="muted">Hover an island, nation or plot.</p>'; return; }
+    const el = $('#inspector'); if (!hh) { el.innerHTML = ''; return; }
     if (hh.kind === 'plot') { const o = state.owners[hh.login]; const r = o.repos.find((x) => x.name === hh.repo); const t = state.towns[(hh.login + '/' + hh.repo).toLowerCase()];
       const n = hh.n || (o.repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0)).indexOf(r) + 1);
       el.innerHTML = `<h4>${esc(hh.repo)}</h4><p>${esc(hh.login)} · plot #${n}${r.created ? ' · granted ' + esc(r.created.slice(0, 10)) : ''}</p><p>${t ? `<b>${esc(t.archetype.name)}</b>` : r.size === 0 ? 'Empty plot' : 'Fogged. Tap to scan and build.'}</p>${r.lang ? `<p class="muted">${esc(r.lang)}${r.stars ? ' · ' + fmt(r.stars) + ' stars' : ''}</p>` : ''}`; }
@@ -3127,7 +3127,6 @@ class WorldView {
   function renderShelf() {
     const ts = Object.values(state.towns).sort((a, b) => (b.builtAt || 0) - (a.builtAt || 0));
     $('#shelf-count').textContent = `${ts.length} town${ts.length === 1 ? '' : 's'}`;
-    $('#shelf').innerHTML = ts.slice(0, 80).map((t) => `<button data-town="${esc(t.key.toLowerCase())}"${t.public ? '' : ' class="mine" title="Only in your browser"'}>${esc(t.key)}</button>`).join('');
   }
 
   load(); renderShelf(); setMode(state.mode);
