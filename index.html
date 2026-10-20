@@ -106,7 +106,7 @@ body[data-view="3d"] #town-canvas{display:none} body[data-tab="world"] #town-3d,
 .labels3d{position:absolute;inset:0;pointer-events:none;overflow:hidden}
 .l3{position:absolute;left:0;top:0;white-space:nowrap;font:600 11px system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#2E2E2C;text-shadow:0 0 3px #EFEEEA,0 0 3px #EFEEEA,0 0 6px #EFEEEA}
 .l3[hidden]{display:none}
-.l3.lib{font-weight:500;color:#6B6A66;font-size:10px}
+.l3.lib{font-weight:600;color:#7A5E1E;font-size:10.5px;text-transform:none;letter-spacing:0}.linkish{border:0;background:none;color:var(--accent);padding:0;text-align:left;cursor:pointer;font:inherit}
 .l3.street{font-size:9.5px;color:#55534E;letter-spacing:.08em}
 .l3.file{text-transform:none;letter-spacing:0;font-weight:600;font-size:10.5px;line-height:15px;color:#2E2E2C;background:#FFFFFFE8;border:1px solid #D2CFC6;border-radius:4px;padding:0 6px;text-shadow:none;box-shadow:0 1px 2px #0000001A}
 .l3.file{overflow:visible}.l3.file::after{content:'';position:absolute;left:var(--lx,0);top:100%;width:1px;height:var(--ly,10px);background:#8A867C}
@@ -1058,18 +1058,36 @@ function buildTown(scan) {
     b.lw = Math.max(1, Math.ceil(b.w + 0.3)); b.ld = Math.max(1, Math.ceil(b.d + 0.3));
   }
 
-  // pack each district's lots into a block: shelves of lots, biggest first, entry files at the front
+  // ---- layout v4: each district is an organic blob of buildings on a hexagonal land; imports run as wires, not roads
   const PAVE = 0.08;
+  const SQ3 = Math.sqrt(3), NS = 24;
+  const hexN = (dx, dy) => Math.max((2 * Math.abs(dx)) / SQ3, Math.abs(dx) / SQ3 + Math.abs(dy)); // pointy-top hexagon "radius" of an offset
   const blocks = new Map();
   for (const g of districts) {
-    const bs = buildings.filter((b) => b.district === g.id).sort((a, b) => (b.kind === 'hall') - (a.kind === 'hall') || b.lw * b.ld - a.lw * a.ld || (a.path < b.path ? -1 : 1));
-    const areaSum = bs.reduce((a, b) => a + b.lw * b.ld, 0);
-    const maxW = Math.max(1, ...bs.map((b) => b.lw));
-    const rowW = Math.max(maxW, Math.ceil(Math.sqrt(areaSum * 1.2)));
-    let x = 0, y = 0, rowH = 0, wUsed = 0;
-    for (const b of bs) { if (x > 0 && x + b.lw > rowW) { x = 0; y += rowH; rowH = 0; } b.lx = x; b.ly = y; x += b.lw; rowH = Math.max(rowH, b.ld); wUsed = Math.max(wUsed, x); }
-    blocks.set(g.id, { w: Math.max(2, wUsed + 1), h: Math.max(2, y + rowH + 1), bs });
+    const bs = buildings.filter((b) => b.district === g.id).sort((a, b) => (b.kind === 'hall') - (a.kind === 'hall') || b.w * b.d - a.w * a.d || (a.path < b.path ? -1 : 1));
+    const gr = rng(hashStr(scan.owner + '/' + scan.repo + '#' + g.id));
+    const ex = 0.85 + gr() * 0.5, a0 = gr() * Math.PI, ca = Math.cos(a0), sa = Math.sin(a0);
+    const put = []; const M = 0.3;
+    for (const b of bs) {
+      const hw = b.w / 2 + M, hd = b.d / 2 + M; let px = 0, py = 0;
+      for (let k = 0; k < 6000; k++) {
+        const rr = 0.42 * Math.sqrt(k), th = k * 2.399963, ux = rr * Math.cos(th) * ex, uy = (rr * Math.sin(th)) / ex;
+        px = ux * ca - uy * sa; py = ux * sa + uy * ca;
+        if (put.every((q) => Math.abs(px - q.x) >= hw + q.hw || Math.abs(py - q.y) >= hd + q.hd)) break;
+      }
+      b.lx = px; b.ly = py; b.ang = (gr() - 0.5) * 0.24; put.push({ x: px, y: py, hw, hd });
+    }
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+    for (const b of bs) { x0 = Math.min(x0, b.lx - b.w / 2); x1 = Math.max(x1, b.lx + b.w / 2); y0 = Math.min(y0, b.ly - b.d / 2); y1 = Math.max(y1, b.ly + b.d / 2); }
+    const ox = (x0 + x1) / 2, oy = (y0 + y1) / 2; for (const b of bs) { b.lx -= ox; b.ly -= oy; }
+    const raw = new Array(NS).fill(0);
+    for (const b of bs) for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1], [-1, 1]]) { const px = b.lx + sx * b.w / 2, py = b.ly + sy * b.d / 2; const i = Math.floor(((Math.atan2(py, px) + Math.PI) / (2 * Math.PI)) * NS) % NS; raw[i] = Math.max(raw[i], Math.hypot(px, py)); }
+    let sm = raw.map((v, i) => Math.max(v, 0.85 * raw[(i + NS - 1) % NS], 0.85 * raw[(i + 1) % NS]));
+    for (let pass = 0; pass < 2; pass++) sm = sm.map((v, i) => (sm[(i + NS - 1) % NS] + 2 * v + sm[(i + 1) % NS]) / 4);
+    const prof = sm.map((v, i) => Math.max(v, raw[i]) + 0.75).map((v) => Math.max(v, 1.3));
+    blocks.set(g.id, { bs, prof, rmax: Math.max(...prof), cx: 0, cy: 0 });
   }
+  const rAt = (B, th) => { let f = ((th + Math.PI) / (2 * Math.PI)) * NS - 0.5; f = ((f % NS) + NS) % NS; const i = Math.floor(f), t = f - i; return B.prof[i % NS] * (1 - t) + B.prof[(i + 1) % NS] * t; };
 
   // districts: the busiest-imported one settles in the middle; the rest sit close to the districts they trade with
   const dEdges = new Map();
@@ -1079,43 +1097,45 @@ function buildTown(scan) {
   const pair = new Map(); for (const [k, n] of dEdges) { const [a, c] = k.split('>').map(Number); const kk = Math.min(a, c) + '|' + Math.max(a, c); pair.set(kk, (pair.get(kk) || 0) + n); }
   const trade = (a, c) => pair.get(Math.min(a, c) + '|' + Math.max(a, c)) || 0;
   const dOrder = districts.map((g) => g.id).sort((a, b) => (inbound.get(b) || 0) - (inbound.get(a) || 0) || a - b);
-  // a road lane only where a real import joins two districts; otherwise they sit one tile apart
   const thr = Math.max(1, totalTraffic * 0.004);
-  const gapOf = (a, c) => (trade(a, c) >= thr ? 3 : 1);
+  const gapOf = (a, c) => (trade(a, c) >= thr ? 1.3 : 0.6);
+  const apart = (A, B, gap) => { const dx = B.cx - A.cx, dy = B.cy - A.cy, d = Math.hypot(dx, dy); if (d < 1e-6) return false; const th = Math.atan2(dy, dx); return d >= rAt(A, th) + rAt(B, th + Math.PI) + gap; };
   const placed = [];
   for (const id of dOrder) {
     const B = blocks.get(id);
-    if (!placed.length) { B.x0 = 0; B.y0 = 0; placed.push(id); continue; }
+    if (!placed.length) { placed.push(id); continue; }
     let best = null, bestS = Infinity;
-    const free = (x0, y0) => placed.every((pid) => { const P = blocks.get(pid), GAP = gapOf(id, pid); return x0 + B.w + GAP <= P.x0 || P.x0 + P.w + GAP <= x0 || y0 + B.h + GAP <= P.y0 || P.y0 + P.h + GAP <= y0; });
     for (const pid of placed) {
-      const P = blocks.get(pid), GAP = gapOf(id, pid);
-      const spots = [];
-      for (let o = -B.h + 1; o < P.h; o++) { spots.push([P.x0 + P.w + GAP, P.y0 + o], [P.x0 - GAP - B.w, P.y0 + o]); }
-      for (let o = -B.w + 1; o < P.w; o++) { spots.push([P.x0 + o, P.y0 + P.h + GAP], [P.x0 + o, P.y0 - GAP - B.h]); }
-      for (const [x0, y0] of spots) {
-        if (!free(x0, y0)) continue;
-        const cx = x0 + B.w / 2, cy = y0 + B.h / 2;
-        let s = 0.15 * (Math.abs(cx) + Math.abs(cy));
-        // keep the whole district a compact rectangle: penalise the bounding box it would make
-        let bx0 = x0, by0 = y0, bx1 = x0 + B.w, by1 = y0 + B.h;
-        for (const q of placed) { const Q = blocks.get(q); bx0 = Math.min(bx0, Q.x0); by0 = Math.min(by0, Q.y0); bx1 = Math.max(bx1, Q.x0 + Q.w); by1 = Math.max(by1, Q.y0 + Q.h); }
-        s += 1.6 * ((bx1 - bx0) + (by1 - by0)) + 0.6 * Math.abs((bx1 - bx0) - (by1 - by0));
-        for (const q of placed) { const Q = blocks.get(q); const w = trade(id, q); if (w) s += Math.log2(1 + w) * 2 * (Math.abs(cx - (Q.x0 + Q.w / 2)) + Math.abs(cy - (Q.y0 + Q.h / 2))); }
-        s += rnd() * 0.01;
-        if (s < bestS) { bestS = s; best = [x0, y0]; }
+      const P = blocks.get(pid);
+      for (let k = 0; k < 36; k++) {
+        const th = (k / 36) * Math.PI * 2 + rnd() * 0.05, dist = rAt(P, th) + rAt(B, th + Math.PI) + gapOf(id, pid);
+        const x = P.cx + Math.cos(th) * dist, y = P.cy + Math.sin(th) * dist;
+        B.cx = x; B.cy = y;
+        if (!placed.every((q) => apart(blocks.get(q), B, gapOf(id, q)))) continue;
+        let R = hexN(x, y) + B.rmax; for (const q of placed) { const Q = blocks.get(q); R = Math.max(R, hexN(Q.cx, Q.cy) + Q.rmax); }
+        let sc = 0.15 * Math.hypot(x, y) + 1.6 * R;
+        for (const q of placed) { const Q = blocks.get(q); const w = trade(id, q); if (w) sc += Math.log2(1 + w) * 2 * (Math.abs(x - Q.cx) + Math.abs(y - Q.cy)); }
+        sc += rnd() * 0.01;
+        if (sc < bestS) { bestS = sc; best = [x, y]; }
       }
     }
-    B.x0 = best[0]; B.y0 = best[1]; placed.push(id);
+    if (!best) { const far = Math.max(...placed.map((q) => { const Q = blocks.get(q); return Q.cx + Q.rmax; })); best = [far + B.rmax + 1, 0]; }
+    B.cx = best[0]; B.cy = best[1]; placed.push(id);
   }
-  // buildings stand centred in their lots
-  for (const [id, B] of blocks) for (const b of B.bs) { b.x = B.x0 + 0.5 + b.lx + b.lw / 2; b.y = B.y0 + 0.5 + b.ly + b.ld / 2; b.ang = 0; b.gz = PAVE; }
-  const allBlocks = [...blocks.values()];
-  const TB = { x0: Math.min(...allBlocks.map((B) => B.x0)), y0: Math.min(...allBlocks.map((B) => B.y0)), x1: Math.max(...allBlocks.map((B) => B.x0 + B.w)), y1: Math.max(...allBlocks.map((B) => B.y0 + B.h)) };
-  const tcx = (TB.x0 + TB.x1) / 2, tcy = (TB.y0 + TB.y1) / 2;
+  // each blob's outline, then the smallest hexagon that holds them all
+  const outline = (B) => B.prof.map((r, i) => { const th = ((i + 0.5) / NS) * 2 * Math.PI - Math.PI; return [B.cx + Math.cos(th) * r, B.cy + Math.sin(th) * r]; });
+  const allPts = [...blocks.values()].flatMap(outline);
+  let bx0 = Math.min(...allPts.map((p) => p[0])), bx1 = Math.max(...allPts.map((p) => p[0])), by0 = Math.min(...allPts.map((p) => p[1])), by1 = Math.max(...allPts.map((p) => p[1]));
+  let tcx = (bx0 + bx1) / 2, tcy = (by0 + by1) / 2, Rin = Infinity;
+  for (let ix = -6; ix <= 6; ix++) for (let iy = -6; iy <= 6; iy++) { const cx = (bx0 + bx1) / 2 + ix * 0.5, cy = (by0 + by1) / 2 + iy * 0.5; const r = Math.max(...allPts.map((p) => hexN(p[0] - cx, p[1] - cy))); if (r < Rin) { Rin = r; tcx = cx; tcy = cy; } }
+  // buildings stand where the blob put them
+  for (const B of blocks.values()) for (const b of B.bs) { b.x = B.cx + b.lx; b.y = B.cy + b.ly; b.gz = PAVE; }
   const mainId = dOrder[0];
+  const HR = Rin + 3.2;
+  const edgePoint = (ang, R) => { const c = Math.cos(ang), s2 = Math.sin(ang), k = R / hexN(c, s2); return [tcx + c * k, tcy + s2 * k]; };
+  const ringPoint = (ang) => edgePoint(ang, HR);
 
-  // ---- outside world: freight terminals beyond the edge, toward the district that uses them
+  // ---- outside world: libraries are gates on the land's edge, toward the district that uses them
   const extList = [...ext.entries()].map(([name, e]) => ({ name, n: e.n, byB: e.byB, declared: e.declared || null, build: !!e.build, std: !!e.std, lm: landmarkFor(name) }))
     .filter((e) => e.n > 0 || e.declared === 'run' || e.build || e.lm)
     .sort((a, b) => (b.n + (b.declared === 'run' ? 3 : 0) + (b.lm ? 2 : 0)) - (a.n + (a.declared === 'run' ? 3 : 0) + (a.lm ? 2 : 0)) || (a.name < b.name ? -1 : 1));
@@ -1126,110 +1146,23 @@ function buildTown(scan) {
     const from = bestD != null ? bestD : (districts.find((g) => g.civic) || districts[0]).id;
     const dev = e.declared === 'dev' || e.build;
     const users = [...e.byB.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([id]) => id);
-    return { name: e.name, uses: e.n, kind: e.lm ? e.lm.key : null, label: e.lm ? e.lm.label : null, from, users: users.slice(0, 8), trail: dev && e.n === 0, std: e.std, r: Math.min(1.5, 1.0 + 0.15 * Math.log2(1 + e.n)) };
+    const dists = [...perD.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).slice(0, 6).map(([d, n]) => ({ d, n }));
+    return { name: e.name, uses: e.n, kind: e.lm ? e.lm.key : null, label: e.lm ? e.lm.label : null, from, users: users.slice(0, 8), dists, trail: dev && e.n === 0, std: e.std, r: 0.9 };
   });
-  // each sits on the town's outer ring, on the side facing its district, kept apart from its neighbours
-  const OUTSET = 2.2;
-  const ringPoint = (ang) => { const hx = (TB.x1 - TB.x0) / 2 + OUTSET, hy = (TB.y1 - TB.y0) / 2 + OUTSET; const c = Math.cos(ang), s = Math.sin(ang); const k = Math.min(hx / (Math.abs(c) || 1e-6), hy / (Math.abs(s) || 1e-6)); return [tcx + c * k, tcy + s * k]; };
-  clearings.forEach((c) => { const B = blocks.get(c.from); c.ang = Math.atan2(B.y0 + B.h / 2 - tcy, B.x0 + B.w / 2 - tcx) || 0; });
+  clearings.forEach((c) => { const B = blocks.get(c.from); c.ang = Math.atan2(B.cy - tcy, B.cx - tcx) || 0; });
   clearings.sort((a, b) => a.ang - b.ang);
-  for (let pass = 0; pass < 60 && clearings.length > 1; pass++) {
+  for (let pass = 0; pass < 80 && clearings.length > 1; pass++) {
     let moved = false;
-    for (let i = 0; i < clearings.length; i++) { const a = clearings[i], b = clearings[(i + 1) % clearings.length]; const pa = ringPoint(a.ang), pb = ringPoint(b.ang); if (Math.hypot(pa[0] - pb[0], pa[1] - pb[1]) < a.r + b.r + 1.6) { a.ang -= 0.03; b.ang += 0.03; moved = true; } }
+    for (let i = 0; i < clearings.length; i++) { const a = clearings[i], b = clearings[(i + 1) % clearings.length]; const pa = ringPoint(a.ang), pb = ringPoint(b.ang); if (Math.hypot(pa[0] - pb[0], pa[1] - pb[1]) < a.r + b.r + 2.2) { a.ang -= 0.03; b.ang += 0.03; moved = true; } }
     if (!moved) break;
   }
-  clearings.forEach((c) => { const [x, y] = ringPoint(c.ang); c.x = Math.floor(x) + 0.5; c.y = Math.floor(y) + 0.5; });
+  clearings.forEach((c) => { const [x, y] = edgePoint(c.ang, HR - 0.5); c.x = Math.round(x * 100) / 100; c.y = Math.round(y * 100) / 100; const B = blocks.get(c.from); c.road = { pts: [[c.x, c.y], [B.cx, B.cy]], dashed: c.trail }; });
 
-  // ---- roads: routed along the tiles between district edges, heaviest first, so lighter links merge into them
-  const key = (x, y) => x + ',' + y;
-  const blocked = new Set();
-  for (const B of allBlocks) for (let x = B.x0; x < B.x0 + B.w; x++) for (let y = B.y0; y < B.y0 + B.h; y++) blocked.add(key(x, y));
-  for (const c of clearings) for (let x = Math.floor(c.x - c.r); x <= Math.floor(c.x + c.r); x++) for (let y = Math.floor(c.y - c.r); y <= Math.floor(c.y + c.r); y++) if (Math.hypot(x + 0.5 - c.x, y + 0.5 - c.y) < c.r) blocked.add(key(x, y));
-  const LIM = { x0: TB.x0 - OUTSET - 4, y0: TB.y0 - OUTSET - 4, x1: TB.x1 + OUTSET + 4, y1: TB.y1 + OUTSET + 4 };
-  const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-  const roadTiles = new Map();
-  const centerOf = (id) => { const B = blocks.get(id); return [B.x0 + B.w / 2, B.y0 + B.h / 2]; };
-  const gate = (id, toward) => {
-    const B = blocks.get(id), [cx, cy] = centerOf(id), [tx, ty] = toward;
-    const dx = (tx - cx) / B.w, dy = (ty - cy) / B.h;
-    const clampI = (v, a, b) => Math.max(a, Math.min(b, Math.floor(v)));
-    if (Math.abs(dx) > Math.abs(dy)) return { tile: [dx > 0 ? B.x0 + B.w : B.x0 - 1, clampI(cy + (ty - cy) * 0.3, B.y0 + (B.h > 2 ? 1 : 0), B.y0 + B.h - (B.h > 2 ? 2 : 1))], into: dx > 0 ? 1 : 0 };
-    return { tile: [clampI(cx + (tx - cx) * 0.3, B.x0 + (B.w > 2 ? 1 : 0), B.x0 + B.w - (B.w > 2 ? 2 : 1)), dy > 0 ? B.y0 + B.h : B.y0 - 1], into: dy > 0 ? 3 : 2 };
-  };
-  // binary heap A*: each step costs 1, reusing a road costs less, turning costs extra
-  const routeTiles = (a, b) => {
-    const heap = []; const push = (n) => { heap.push(n); let i = heap.length - 1; while (i > 0) { const p = (i - 1) >> 1; if (heap[p].f <= heap[i].f) break; [heap[p], heap[i]] = [heap[i], heap[p]]; i = p; } };
-    const pop = () => { const top = heap[0], last = heap.pop(); if (heap.length) { heap[0] = last; let i = 0; for (;;) { const l = 2 * i + 1, r = l + 1; let m = i; if (l < heap.length && heap[l].f < heap[m].f) m = l; if (r < heap.length && heap[r].f < heap[m].f) m = r; if (m === i) break; [heap[m], heap[i]] = [heap[i], heap[m]]; i = m; } } return top; };
-    const best = new Map(); push({ x: a[0], y: a[1], d: -1, c: 0, f: 0, prev: null });
-    let guard = 0;
-    while (heap.length && guard++ < 200000) {
-      const n = pop();
-      if (n.x === b[0] && n.y === b[1]) { const out = []; for (let p = n; p; p = p.prev) out.push([p.x, p.y]); return out.reverse(); }
-      for (let d = 0; d < 4; d++) {
-        const x = n.x + DIRS[d][0], y = n.y + DIRS[d][1];
-        if (x < LIM.x0 || y < LIM.y0 || x > LIM.x1 || y > LIM.y1) continue;
-        if (blocked.has(key(x, y)) && !(x === b[0] && y === b[1])) continue;
-        const c = n.c + (roadTiles.has(key(x, y)) ? 0.35 : 1) + (n.d >= 0 && n.d !== d ? 0.9 : 0);
-        const k = key(x, y) + ':' + d; if (best.has(k) && best.get(k) <= c) continue; best.set(k, c);
-        push({ x, y, d, c, f: c + Math.abs(b[0] - x) + Math.abs(b[1] - y), prev: n });
-      }
-    }
-    return null;
-  };
-  const lay = (path, w, trail, ends) => {
-    path.forEach(([x, y], i) => {
-      const r = roadTiles.get(key(x, y)) || { x, y, t: 0, dirs: 0, trail: true }; r.t += w; if (!trail) r.trail = false; roadTiles.set(key(x, y), r);
-      for (const j of [i - 1, i + 1]) if (path[j]) { const d = DIRS.findIndex(([dx, dy]) => dx === path[j][0] - x && dy === path[j][1] - y); r.dirs |= 1 << d; }
-    });
-    for (const [tile, into] of ends) { const r = roadTiles.get(key(...tile)); if (r && into != null) r.dirs |= 1 << into; }
-  };
-  // which district pairs get a road: every pair that trades, then loners linked to their nearest neighbour by a trail
+  // ---- wires: one for every pair of districts that import each other enough
   const links = [];
-  [...pair.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).forEach(([kk, n]) => { if (n < Math.max(1, totalTraffic * 0.004)) return; const [a, c] = kk.split('|').map(Number); links.push({ a, c, n }); });
-  const linked = new Set([mainId]); links.forEach((s) => { linked.add(s.a); linked.add(s.c); });
-  for (const id of dOrder) {
-    if (linked.has(id)) continue;
-    const [x, y] = centerOf(id);
-    const near = [...linked].sort((p, q) => { const P = centerOf(p), Q = centerOf(q); return Math.abs(P[0] - x) + Math.abs(P[1] - y) - Math.abs(Q[0] - x) - Math.abs(Q[1] - y); })[0];
-    // loners are tucked against a neighbour, with no trail
-    linked.add(id);
-  }
-  for (const s of links) {
-    const ga = gate(s.a, centerOf(s.c)), gc = gate(s.c, centerOf(s.a));
-    const path = routeTiles(ga.tile, gc.tile);
-    s.path = path || [ga.tile, gc.tile];
-    lay(s.path, s.n || 0.5, !s.n, [[ga.tile, ga.into], [gc.tile, gc.into]]);
-  }
-  clearings.forEach((c) => {
-    const g = gate(c.from, [c.x, c.y]); const tgt = [Math.floor(c.x), Math.floor(c.y)];
-    const path = routeTiles(g.tile, tgt) || [g.tile, tgt];
-    lay(path, Math.max(0.5, Math.min(4, c.uses)), c.trail, [[g.tile, g.into]]);
-    c.road = { pts: path.map(([x, y]) => [x + 0.5, y + 0.5]), dashed: c.trail };
-  });
-
-  // ---- streets: named for the file they carry when one dominates, otherwise for where they lead
-  const dLabel = (id) => { const g = districts.find((x) => x.id === id); return g.civic ? 'Civic' : g.label; };
+  [...pair.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).forEach(([kk, n]) => { if (n < thr) return; const [a, c] = kk.split('|').map(Number); links.push({ a, c, n }); });
+  const streets = [], roads = [];
   const edgeList = [...edges.entries()].map(([k, n]) => { const [a, c] = k.split('>').map(Number); return [buildings[a], buildings[c], n]; });
-  const carried = (a, c) => {
-    const byTarget = new Map();
-    for (const [A, B, n] of edgeList) { const da = A.district, dc = B.district; if ((da === a && dc === c) || (da === c && dc === a)) byTarget.set(B.id, (byTarget.get(B.id) || 0) + n); }
-    const ranked = [...byTarget.entries()].sort((x, y) => y[1] - x[1] || x[0] - y[0]);
-    const total = ranked.reduce((acc, r) => acc + r[1], 0);
-    return ranked.length ? { top: buildings[ranked[0][0]], share: ranked[0][1] / (total || 1), list: ranked.slice(0, 3).map(([id, n]) => ({ path: buildings[id].path, n })) } : null;
-  };
-  const GENERIC = /^(index|main|init|__init__|mod|lib|app|utils?|helpers?|common|types?)$/i;
-  const corners = (path) => { const out = []; path.forEach((p, i) => { const a = path[i - 1], b = path[i + 1]; if (!a || !b || (a[0] - p[0]) !== (p[0] - b[0]) || (a[1] - p[1]) !== (p[1] - b[1])) out.push([p[0] + 0.5, p[1] + 0.5]); }); return out; };
-  const streets = links.map((s) => {
-    const tgt = (inbound.get(s.a) || 0) >= (inbound.get(s.c) || 0) ? s.a : s.c;
-    const via = s.n ? carried(s.a, s.c) : null;
-    const viaName = via ? basename(via.top.path).replace(/\.[^.]+$/, '') : '';
-    const shared = links.filter((k) => k.n && (k.a === tgt || k.c === tgt)).length > 1;
-    const origin = s.a === tgt ? s.c : s.a;
-    const base = shared ? dLabel(origin) : via && via.share >= 0.3 && !GENERIC.test(viaName) ? titleCase(viaName) : dLabel(tgt);
-    return { a: s.a, c: s.c, target: tgt, traffic: s.n, w: s.n ? 0.38 + Math.min(0.42, 0.06 * Math.log2(1 + s.n) * 2) : 0.2, base, suffix: s.n >= 10 ? 'Ave' : s.n >= 3 ? 'St' : 'Ln', shared, carries: via ? via.list : [], from: origin, empty: !s.n, path: s.path, pts: corners(s.path) };
-  }).sort((x, y) => y.traffic - x.traffic || x.a - y.a);
-  const usedNames = new Set(), usedBase = new Set();
-  streets.forEach((st) => { if (st.empty) { st.name = ''; return; } let base = st.base; if (usedBase.has(base)) base = dLabel(st.from) + '–' + dLabel(st.target); usedBase.add(base); let nm = base + ' ' + st.suffix; if (usedNames.has(nm)) nm = base + ' Way'; usedNames.add(nm); st.name = nm; });
 
   // ---- district ground and labels
   const dOut = districts.map((g) => {
@@ -1238,8 +1171,11 @@ function buildTown(scan) {
     const top = [...langs.entries()].sort((a, b) => b[1] - a[1])[0];
     const kinds = new Map(); bs.forEach((b) => kinds.set(b.kind, (kinds.get(b.kind) || 0) + 1));
     const role = (kinds.get('vault') || 0) >= bs.length / 2 ? 'data' : (kinds.get('service') || 0) >= bs.length / 2 ? 'services' : g.root ? 'pages' : null;
+    const shape = outline(B); const r1 = (v) => Math.round(v * 100) / 100;
+    const sx = shape.map((p) => p[0]), sy = shape.map((p) => p[1]);
     return { id: g.id, key: g.key, label: g.label, civic: !!g.civic, role, outskirts: g.outskirts || null, main: g.id === mainId,
-      block: { x0: B.x0, y0: B.y0, x1: B.x0 + B.w, y1: B.y0 + B.h }, hub: { x: B.x0 + B.w / 2, y: B.y0 + B.h / 2, r: 0.5 }, labelAt: { x: B.x0 + B.w / 2, y: B.y0 + B.h + 0.9 },
+      block: { x0: Math.min(...sx), y0: Math.min(...sy), x1: Math.max(...sx), y1: Math.max(...sy) }, shape: shape.map(([x, y]) => [r1(x), r1(y)]), hub: { x: r1(B.cx), y: r1(B.cy), r: 0.5 },
+      labelAt: { x: r1(B.cx), y: r1(B.cy + rAt(B, Math.PI / 2) - 0.4), w: r1(Math.min(rAt(B, 0) + rAt(B, Math.PI), 2 * B.rmax) * 0.9) },
       lang: top ? top[0] : 'other', lines: bs.reduce((a, b) => a + b.lines, 0), files: bs.reduce((a, b) => a + b.files, 0), bcount: bs.length };
   });
 
@@ -1276,17 +1212,14 @@ function buildTown(scan) {
   const commits = scan.counts && scan.counts.commits != null ? scan.counts.commits : 1;
   const rings = Math.max(1, Math.min(9, Math.round(Math.log2(commits + 1))));
   const visitors = []; const vN = Math.min(24, scan.meta.stars || 0);
-  for (let i = 0; i < vN; i++) { const a = rnd() * Math.PI * 2; const [x, y] = ringPoint(a); visitors.push([Math.round((tcx + (x - tcx) * 0.82) * 100) / 100, Math.round((tcy + (y - tcy) * 0.82) * 100) / 100]); }
+  for (let i = 0; i < vN; i++) { const a = rnd() * Math.PI * 2; const [x, y] = edgePoint(a, HR - 1.3); visitors.push([Math.round(x * 100) / 100, Math.round(y * 100) / 100]); }
   const cranes = []; const nCr = Math.min(8, scan.meta.openIssues || 0);
   const craneable = buildings.filter((b) => !['stake', 'fence', 'plaque', 'trash', 'hut', 'hutcluster', 'yard'].includes(b.kind) && !b.special).sort((a, b) => hashStr(a.path) - hashStr(b.path));
   for (let i = 0; i < nCr && i < craneable.length; i++) cranes.push(craneable[i].id);
 
-  const ringPad = 2.0; // rings are thin lines in a fixed band, so more commits means more lines, not more space
-  const core = { x0: TB.x0 - 1.5, y0: TB.y0 - 1.5, x1: TB.x1 + 1.5, y1: TB.y1 + 1.5 };
-  const xs = [core.x0 - ringPad, core.x1 + ringPad, ...clearings.map((c) => c.x - c.r - 1), ...clearings.map((c) => c.x + c.r + 1)];
-  const ys = [core.y0 - ringPad, core.y1 + ringPad, ...clearings.map((c) => c.y - c.r - 1), ...clearings.map((c) => c.y + c.r + 1.6)];
-  const bounds = { x0: Math.min(...xs), y0: Math.min(...ys), x1: Math.max(...xs), y1: Math.max(...ys) };
-  const roads = [...roadTiles.values()].sort((a, b) => a.y - b.y || a.x - b.x).map((r) => [r.x, r.y, Math.round(r.t * 10) / 10, r.dirs, r.trail ? 1 : 0]);
+  const hexW = (SQ3 * HR) / 2, cr = Rin + 0.5;
+  const core = { x0: tcx - (SQ3 * cr) / 2, y0: tcy - cr, x1: tcx + (SQ3 * cr) / 2, y1: tcy + cr };
+  const bounds = { x0: tcx - hexW, y0: tcy - HR, x1: tcx + hexW, y1: tcy + HR };
 
   const archetype = classify({ districts: dOut, buildings, scan, edges, streets });
   if (scan.sampled && scan.sampled.eligible > scan.sampled.read) notes.push(`Read ${scan.sampled.read} of ${scan.sampled.eligible} code files; roads reflect that sample.`);
@@ -1294,7 +1227,7 @@ function buildTown(scan) {
   if (scan.truncated) notes.push('GitHub truncated the file tree for this repo.');
 
   return {
-    v: 3, mode: 'code', layout: 'grid', key: scan.owner + '/' + scan.repo, owner: scan.owner, repo: scan.repo, pave: PAVE,
+    v: 4, mode: 'code', layout: 'organic', hex: { x: Math.round(tcx * 100) / 100, y: Math.round(tcy * 100) / 100, R: Math.round(HR * 100) / 100, rin: Math.round(Rin * 100) / 100 }, wires: links.map((l) => [l.a, l.c, l.n]), key: scan.owner + '/' + scan.repo, owner: scan.owner, repo: scan.repo, pave: PAVE,
     W: core.x1 - core.x0, H: core.y1 - core.y0, bounds, core, center: [tcx, tcy], order: Math.round(order * 100) / 100,
     districts: dOut, buildings: buildings.map(slimB), segs: [], links: linksOut, roads,
     streets: streets.map((s) => ({ a: s.a, c: s.c, name: s.name, traffic: s.traffic, target: s.target, from: s.from, carries: s.carries, empty: s.empty, w: s.w, pts: s.pts, path: s.path })),
@@ -1994,6 +1927,8 @@ function kit3(col, ox, oy, oz, scale = 1) {
     sphere(x, y, z, r, color, sy = 1, edge = 'soft', half = false) { const g = new THREE.SphereGeometry(r, 18, 10, 0, Math.PI * 2, 0, half ? Math.PI / 2 : Math.PI); g.scale(1, sy, 1); put(g, M(x, y, z), color, edge, 30); },
     disc(x, y, z, r, color, seg = 36, edge = null) { put(new THREE.CircleGeometry(r, seg), M(x, y, z, -Math.PI / 2), color, edge); },
     ring(x, y, z, r0, r1, color, sx = 1, sy = 1) { const g = new THREE.RingGeometry(r0, r1, 40); g.scale(sx, sy, 1); put(g, M(x, y, z, -Math.PI / 2), color, null); },
+    prism(pts, z, h, color, edge = 'ink') { const sh = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, -y))); put(new THREE.ExtrudeGeometry(sh, { depth: h, bevelEnabled: false }), M(0, 0, z, -Math.PI / 2), color, edge, 40); },
+    fill(pts, z, color) { const sh = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, -y))); put(new THREE.ShapeGeometry(sh), M(0, 0, z, -Math.PI / 2), color, null); },
     plane(x0, y0, x1, y1, z, color) { const g = new THREE.PlaneGeometry(x1 - x0, y1 - y0); put(g, M((x0 + x1) / 2, (y0 + y1) / 2, z, -Math.PI / 2), color, null); },
     ico(x, y, z, r, color, spin = 0) { put(new THREE.IcosahedronGeometry(r, 0), M(x, y, z, 0.4, spin, 0.2), color, 'tree'); },
     line(pts, e = 'soft') { const hex = edgeHex(e); for (let i = 0; i < pts.length; i += 2) col.seg(V(...pts[i]), V(...pts[i + 1]), hex); },
@@ -2211,7 +2146,7 @@ class Town3D {
     this._cityLines = this._add(new THREE.LineSegments(city.lineGeometry(), new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 1 })));
     // frame the whole town: its blocks, its terminals and its tallest building
     const box = new THREE.Box3(); for (const B of this._bs) if (B) box.union(B.box);
-    if (t.mode === 'code') { const c = t.core; box.expandByPoint(new THREE.Vector3(c.x0, 0, c.y0)).expandByPoint(new THREE.Vector3(c.x1, 0, c.y1)); for (const cl of t.clearings) box.expandByPoint(new THREE.Vector3(cl.x - cl.r, 0, cl.y - cl.r)).expandByPoint(new THREE.Vector3(cl.x + cl.r, 1, cl.y + cl.r)); }
+    if (t.mode === 'code') { const c = t.v >= 4 ? t.bounds : t.core; box.expandByPoint(new THREE.Vector3(c.x0, 0, c.y0)).expandByPoint(new THREE.Vector3(c.x1, 0, c.y1)); for (const cl of t.clearings) box.expandByPoint(new THREE.Vector3(cl.x - cl.r, 0, cl.y - cl.r)).expandByPoint(new THREE.Vector3(cl.x + cl.r, 1, cl.y + cl.r)); }
     if (box.isEmpty()) box.setFromObject(this._ground);
     this._box = box;
     const size = box.getSize(new THREE.Vector3()); this._half = Math.max(8, Math.hypot(size.x, size.z) * 0.42); this._applyFrustum();
@@ -2224,7 +2159,7 @@ class Town3D {
   }
   // district name: small lowercase text lying on the ground along the block's south edge, wrapped to the block's width
   _flatName(d, pave) {
-    const B = d.block, wU = Math.max(1.2, B.x1 - B.x0 - 0.4), hU = 1.0, K = 56;
+    const B = d.block, v4 = !!d.shape, wU = v4 ? Math.max(1.6, d.labelAt.w) : Math.max(1.2, B.x1 - B.x0 - 0.4), hU = 1.0, K = 56;
     const cv = document.createElement('canvas'); cv.width = Math.ceil(wU * K); cv.height = Math.ceil(hU * K);
     const c = cv.getContext('2d'); const txt = String(d.label || '').toLowerCase();
     let fs = 0.42 * K; const font = (n) => `600 ${n}px system-ui,-apple-system,"Segoe UI",sans-serif`;
@@ -2232,13 +2167,16 @@ class Town3D {
     let lines = wrap(); while ((lines.length > 2 || lines.some((l) => c.measureText(l).width > cv.width - 6)) && fs > 0.22 * K) { fs -= 2; lines = wrap(); }
     c.font = font(fs); c.fillStyle = 'rgba(58,50,40,0.85)'; c.textBaseline = 'middle';
     const lh = fs * 1.15, y0 = cv.height - (lines.length * lh) / 2 - 3;
-    lines.forEach((l, i) => c.fillText(l, 3, y0 + (i - (lines.length - 1)) * lh));
+    if (v4) c.textAlign = 'center';
+    lines.forEach((l, i) => c.fillText(l, v4 ? cv.width / 2 : 3, y0 + (i - (lines.length - 1)) * lh));
     const tex = new THREE.CanvasTexture(cv); tex.anisotropy = 4;
     const m = new THREE.Mesh(new THREE.PlaneGeometry(wU, hU), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
-    m.rotation.x = -Math.PI / 2; m.position.set(B.x0 + 0.2 + wU / 2, pave + 0.02, B.y1 - hU / 2); m.renderOrder = 2;
+    m.rotation.x = -Math.PI / 2; if (v4) m.position.set(d.labelAt.x, pave + 0.02, d.labelAt.y); else m.position.set(B.x0 + 0.2 + wU / 2, pave + 0.02, B.y1 - hU / 2);
+    m.renderOrder = 2;
     this._add(m);
   }
   _buildCode(t, ground, city) {
+    if (t.v >= 4) return this._buildCode4(t, ground, city);
     const pave = t.pave || 0.08;
     const bx = t.bounds, pad = 1;
     const G = kit3(ground, 0, 0, 0);
@@ -2298,6 +2236,52 @@ class Town3D {
     // loose stands: uneven size, soft edges, stretched one way, with lone trees between
     for (let i = 0; i < groups; i++) { const gx = X0 + 0.6 + rr() * (X1 - X0 - 1.2), gy = Y0 + 0.6 + rr() * (Y1 - Y0 - 1.2), n = rr() < 0.3 ? 1 : 1 + Math.floor(rr() * rr() * 11), a = rr() * 6.28, sx = 0.5 + rr() * 1.3, sy = 0.4 + rr() * 0.8;
       for (let j = 0; j < n; j++) { const u = gauss() * sx, v = gauss() * sy; plant(gx + u * Math.cos(a) - v * Math.sin(a), gy + u * Math.sin(a) + v * Math.cos(a), 0.65 + rr() * 0.9); } }
+  }
+  // v4: a hexagonal land, districts as organic blobs, imports as wires on poles, libraries as gates on the edge
+  _buildCode4(t, ground, city) {
+    const pave = t.pave || 0.08, hx = t.hex, G = kit3(ground, 0, 0, 0), SQ3 = Math.sqrt(3);
+    const hexN = (dx, dy) => Math.max((2 * Math.abs(dx)) / SQ3, Math.abs(dx) / SQ3 + Math.abs(dy));
+    const hexAt = (R) => [0, 1, 2, 3, 4, 5].map((k) => { const a = ((30 + 60 * k) * Math.PI) / 180; return [hx.x + R * Math.cos(a), hx.y + R * Math.sin(a)]; });
+    G.prism(hexAt(hx.R), -0.6, 0.585, AX.slabSide, 'ink');
+    G.fill(hexAt(hx.R - 0.02), 0.002, AX.outside);
+    G.fill(hexAt(hx.rin + 0.55), 0.004, t.archived ? 0xDEDCD5 : AX.ground);
+    // growth rings: thin hexagons in a fixed band around the districts
+    for (let k = 1; k <= t.rings; k++) { const p = hexAt(hx.rin + 0.55 + k * 0.12).map(([x, y]) => [x, y, 0.006]); G.path([...p, p[0]], 'soft'); }
+    for (const d of t.districts) {
+      G.prism(d.shape, 0, pave, AX.pave, 'soft');
+      const tint = d.civic ? AX.tint.civic : AX.tint[d.role] || AX.tint.other;
+      G.fill(d.shape.map(([x, y]) => [hx.x + (x - hx.x) * 1, hx.y + (y - hx.y) * 1]).map(([x, y], i) => { const c = d.hub; return [c.x + (x - c.x) * 0.94, c.y + (y - c.y) * 0.94]; }), pave + 0.003, tint);
+      if (d.bcount) this._flatName(d, pave);
+    }
+    // wires: poles stand at each blob's edge facing the other end; thickness grows with the imports they carry
+    const D = new Map(t.districts.map((d) => [d.id, d])); const H0 = 2.2;
+    const edgeToward = (d, tx, ty) => { const a = Math.atan2(ty - d.hub.y, tx - d.hub.x); const i = Math.floor(((a + Math.PI) / (2 * Math.PI)) * d.shape.length) % d.shape.length; const [sx, sy] = d.shape[i]; const k = Math.max(0, 1 - 0.5 / (Math.hypot(sx - d.hub.x, sy - d.hub.y) || 1)); return [d.hub.x + (sx - d.hub.x) * k, d.hub.y + (sy - d.hub.y) * k]; };
+    const poles = new Map(); const pole = (x, y, h) => { const k = Math.round(x * 4) + ',' + Math.round(y * 4); if (poles.has(k)) return; poles.set(k, 1); const K = kit3(ground, x, y, 0); K.cyl(0, 0, 0, 0.05, h, AX.dark, 8, null); K.box(-0.22, -0.03, h - 0.04, 0.44, 0.06, 0.05, AX.dark, null); };
+    const wire = (a, b, n, hex) => {
+      const dx = b[0] - a[0], dy = b[1] - a[1], len = Math.hypot(dx, dy) || 1, nx = -dy / len, ny = dx / len; const strands = n >= 30 ? 3 : n >= 6 ? 2 : 1; const sag = Math.min(1.4, len * 0.08);
+      for (let s2 = 0; s2 < strands; s2++) { const off = (s2 - (strands - 1) / 2) * 0.16; const pts = []; for (let i = 0; i <= 18; i++) { const u = i / 18; pts.push([a[0] + dx * u + nx * off, a[1] + dy * u + ny * off, H0 - 0.08 * s2 - Math.sin(Math.PI * u) * sag]); } G.path(pts, hex || 'ink'); }
+      pole(a[0], a[1], H0); pole(b[0], b[1], H0);
+    };
+    for (const [a, c, n] of t.wires || []) { const A = D.get(a), C = D.get(c); if (!A || !C) continue; wire(edgeToward(A, C.hub.x, C.hub.y), edgeToward(C, A.hub.x, A.hub.y), n); }
+    // gates: the way out to a library, on the edge of the land; red wires run to them from the districts that import it
+    for (const cl of t.clearings) {
+      const tx = hx.y - cl.y, ty = -(hx.x - cl.x), tl = Math.hypot(tx, ty) || 1, ux = tx / tl, uy = ty / tl;
+      G.disc(cl.x, cl.y, 0.008, 0.62, 0xF2E3A8, 24, 'soft');
+      const K = kit3(ground, cl.x, cl.y, 0); for (const sgn of [-1, 1]) K.cyl(sgn * ux * 0.46, sgn * uy * 0.46, 0, 0.09, 1.15, AX.gold, 10, 'ink');
+      K.line([[-ux * 0.46, -uy * 0.46, 1.15], [ux * 0.46, uy * 0.46, 1.15]], 'ink'); K.sphere(0, 0, 1.28, 0.13, AX.gold, 1, 'ink');
+      for (const { d, n } of cl.dists || []) { const A = D.get(d); if (!A) continue; wire(edgeToward(A, cl.x, cl.y), [cl.x - ux * 0, cl.y - uy * 0, 0].slice(0, 2), n, 'red'); }
+    }
+    // visitors, buildings, cranes
+    for (const b of t.buildings) { const m0 = city.marks(); b._ruin = !!t.archived; const gz = b.gz != null ? b.gz : pave; buildPiece(kit3(city, b.x, b.y, gz), b); this._registerBuilding(b, city, m0, city.marks(), gz); }
+    for (const id of t.cranes || []) { const B = this._bs[id]; if (!B) continue; const top = B.box.max.y, b = t.buildings[id]; const K = kit3(city, b.x, b.y, 0); K.line([[0.2, 0, top - 0.2], [0.2, 0, top + 0.9], [0.2, 0, top + 0.9], [-0.7, 0, top + 0.9], [-0.5, 0, top + 0.9], [-0.5, 0, top + 0.5]], 'red'); }
+    for (const [x, y] of t.visitors || []) { const K = kit3(city, x, y, 0); K.cyl(0, 0, 0, 0.05, 0.16, AX.coral, 8, null); K.sphere(0, 0, 0.21, 0.05, AX.coral, 1, null); }
+    // trees only in the green band between the rings and the edge of the land
+    const rr = rng(hashStr(t.key + ':trees')); const T = kit3(ground, 0, 0, 0); const gauss = () => (rr() + rr() + rr() - 1.5) * 1.4;
+    const lo = hx.rin + 0.55 + (t.rings || 1) * 0.12 + 0.5, hi = hx.R - 0.5;
+    const plant = (x, y, s) => { const r = hexN(x - hx.x, y - hx.y); if (r < lo || r > hi || t.clearings.some((cl) => Math.hypot(cl.x - x, cl.y - y) < 1.3) || (t.visitors || []).some(([vx, vy]) => Math.hypot(vx - x, vy - y) < 0.4)) return; T.tree(x, y, s); };
+    const area = Math.max(0, 2.6 * (hx.R * hx.R - lo * lo)); const groups = Math.min(120, Math.round(area / 9));
+    for (let i = 0; i < groups; i++) { const a = rr() * 6.2832, r = lo + 0.3 + rr() * Math.max(0.2, hi - lo - 0.6); const k = r / hexN(Math.cos(a), Math.sin(a)); const gx = hx.x + Math.cos(a) * k, gy = hx.y + Math.sin(a) * k, n = rr() < 0.35 ? 1 : 1 + Math.floor(rr() * rr() * 7), ang = rr() * 6.28, sx = 0.4 + rr() * 1.0, sy = 0.3 + rr() * 0.6;
+      for (let j = 0; j < n; j++) { const u = gauss() * sx, v = gauss() * sy; plant(gx + u * Math.cos(ang) - v * Math.sin(ang), gy + u * Math.sin(ang) + v * Math.cos(ang), 0.65 + rr() * 0.9); } }
   }
   _buildList(t, ground, city) {
     const G = kit3(ground, 0, 0, 0), g = t.grid;
@@ -2373,7 +2357,7 @@ class Town3D {
     const t = this.town; this._static = [];
     const add = (text, x, y, z, cls) => { const el = document.createElement('div'); el.className = 'l3 ' + (cls || ''); el.textContent = text; this.labels.appendChild(el); this._static.push({ el, v: new THREE.Vector3(x, z, y) }); };
     if (t.mode === 'list') { for (const r of t.grid.rows) if (r.n >= 6) add(r.name, -0.4, r.y + t.grid.RH / 2, 0.1, 'street end'); t.grid.cols.forEach((c) => add(c.name, c.x + t.grid.CW / 2, -0.8, 0.1, 'district')); add('README library', t.W / 2, t.H + 1.25, 2.1, 'district'); return; }
-    for (const c of t.clearings) add(c.name, c.x, c.y + c.r + 0.6, 0.05, 'lib');
+    for (const c of t.clearings) { if (t.hex) { const dx = t.hex.x - c.x, dy = t.hex.y - c.y, k = 1.5 / (Math.hypot(dx, dy) || 1); add(c.name, c.x + dx * k, c.y + dy * k, 0.05, 'lib'); } else add(c.name, c.x, c.y + c.r + 0.6, 0.05, 'lib'); }
     for (const s of t.streets || []) if (s.name && !s.empty && s.path && s.path.length > 3) { const p = s.path[Math.floor(s.path.length / 2)]; add(s.name, p[0] + 0.5, p[1] + 0.5, 0.05, 'street'); }
   }
   _refreshDynamicLabels() { this._dyn = true; }
@@ -2486,7 +2470,8 @@ class Town3D {
     if (t.mode !== 'code') return null;
     const g = new THREE.Vector3(); if (!R.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -(this._pave || 0)), g)) return null;
     for (const cl of t.clearings) if (Math.hypot(g.x - cl.x, g.z - cl.y) < cl.r) return { type: 'clearing', c: cl };
-    for (const d of t.districts) if (g.x >= d.block.x0 && g.x <= d.block.x1 && g.z >= d.block.y0 && g.z <= d.block.y1) return { type: 'district', d };
+    const inPoly = (pt, poly) => { let c = false; for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) { const [xi, yi] = poly[i], [xj, yj] = poly[j]; if ((yi > pt[1]) !== (yj > pt[1]) && pt[0] < ((xj - xi) * (pt[1] - yi)) / (yj - yi) + xi) c = !c; } return c; };
+    for (const d of t.districts) if (d.shape ? inPoly([g.x, g.z], d.shape) : g.x >= d.block.x0 && g.x <= d.block.x1 && g.z >= d.block.y0 && g.z <= d.block.y1) return { type: 'district', d };
     return null;
   }
 
@@ -2727,6 +2712,38 @@ function hexLayout(owners, towns) {
   return { logins, cells, terr };
 }
 
+/* ---------- the library island: shared libraries get their own organic clusters of hexes, offshore ---------- */
+function libLayout(towns, bounds) {
+  const use = new Map();
+  for (const [key, t] of Object.entries(towns)) for (const c of t.clearings || []) {
+    const nm = String(c.name || ''); if (nm.length < 2 || !/^[@\w]/.test(nm) || /[()\s]{2}/.test(nm)) continue; const k = nm.toLowerCase();
+    const e = use.get(k) || { name: nm, key: k, hoods: new Set(), first: Infinity }; e.hoods.add(key); e.first = Math.min(e.first, t.firstBuilt || t.builtAt || 1e15); use.set(k, e);
+  }
+  // a library earns hexes once two or more hoods use it; more users, more hexes; earliest first so existing ones keep their place
+  const libs = [...use.values()].filter((e) => e.hoods.size >= 2).sort((a, b) => a.first - b.first || (a.key < b.key ? -1 : 1))
+    .map((e) => ({ name: e.name, key: e.key, n: e.hoods.size, hoods: [...e.hoods], k: Math.max(1, Math.min(7, Math.round(Math.log2(e.hoods.size) * 1.4))), cells: [] }));
+  const cells = new Map(); if (!libs.length) return { libs, cells, byKey: new Map() };
+  const total = libs.reduce((a, l) => a + l.k, 0), Ri = Math.sqrt(total) * 1.7 + 2;
+  const cx = bounds[2] + 7 + Ri * 1.75, cy = (bounds[1] + bounds[3]) / 2 + (bounds[3] - bounds[1]) * 0.22;
+  const r0 = Math.round(cy / 1.5), q0 = Math.round(cx / HX_SQ3 - r0 / 2), [ix, iy] = hxPx(q0, r0);
+  const free = (q, r) => !cells.has(q + ',' + r);
+  const pxd = (q, r, x, y) => { const [px, py] = hxPx(q, r); return Math.hypot(px - x, py - y); };
+  libs.forEach((L, li) => {
+    let seed = [q0, r0];
+    if (li) { let best = null, bs = 1e9; for (const c of cells.values()) for (const [dq, dr] of HX_DIRS) { const q = c.q + dq, r = c.r + dr; if (!free(q, r)) continue; const sc = pxd(q, r, ix, iy) + 2.2 * hxNoise(L.key + q + ',' + r); if (sc < bs) { bs = sc; best = [q, r]; } } seed = best; }
+    const add = (q, r) => { const [x, y] = hxPx(q, r); const c = { q, r, x, y, li }; cells.set(q + ',' + r, c); L.cells.push(c); };
+    add(seed[0], seed[1]);
+    const [sx, sy] = hxPx(seed[0], seed[1]);
+    while (L.cells.length < L.k) {
+      let best = null, bs = 1e9;
+      for (const c of L.cells) for (const [dq, dr] of HX_DIRS) { const q = c.q + dq, r = c.r + dr; if (!free(q, r)) continue; const sc = pxd(q, r, sx, sy) + 1.6 * hxNoise(L.key + ':' + q + ',' + r); if (sc < bs) { bs = sc; best = [q, r]; } }
+      if (!best) break; add(best[0], best[1]);
+    }
+    L.cx = L.cells.reduce((a, c) => a + c.x, 0) / L.cells.length; L.cy = L.cells.reduce((a, c) => a + c.y, 0) / L.cells.length;
+  });
+  return { libs, cells, byKey: new Map(libs.map((l) => [l.key, l])) };
+}
+
 /* ---------- view ---------- */
 class HexWorld {
   constructor(canvas, app) {
@@ -2742,9 +2759,23 @@ class HexWorld {
     this.owners = owners; this.towns = towns; this.links = worldLinks(owners, towns);
     const sig = Object.keys(owners).sort().map((l) => l + ':' + owners[l].repos.length).join('|');
     if (sig !== this.sig) { this.sig = sig; this._layout(); }
+    const lsig = Object.values(towns).reduce((a, t) => a + (t.clearings || []).length, 0) + ':' + Object.keys(towns).length;
+    if (lsig !== this._lsig || !this.isl) { this._lsig = lsig; this._island(); }
     this._builtSig = null;
     if (this.level.kind === 'nation' && !this.owners[this.level.login]) this.level = { kind: 'world' };
     this.fit();
+  }
+  _island() {
+    const I = libLayout(this.towns, this._landBounds); this.isl = I;
+    const mk = () => new Path2D(), hexAt = (p, x, y) => { HX_CORNERS.forEach(([cx, cy], i) => (i ? p.lineTo(x + cx, y + cy) : p.moveTo(x + cx, y + cy))); p.closePath(); };
+    const edgeAt = (p, x, y, d) => { const a = HX_CORNERS[d], b = HX_CORNERS[(d + 1) % 6]; p.moveTo(x + a[0], y + a[1]); p.lineTo(x + b[0], y + b[1]); };
+    I.P = { fill: I.libs.map(mk), grid: mk(), border: mk(), coast: mk() };
+    let [x0, y0, x1, y1] = this._landBounds;
+    for (const c of I.cells.values()) {
+      hexAt(I.P.fill[c.li], c.x, c.y); hexAt(I.P.grid, c.x, c.y); x1 = Math.max(x1, c.x + 0.87); y0 = Math.min(y0, c.y - 1); y1 = Math.max(y1, c.y + 1);
+      HX_DIRS.forEach(([dq, dr], d) => { const n = I.cells.get((c.q + dq) + ',' + (c.r + dr)); if (!n) edgeAt(I.P.coast, c.x, c.y, d); else if (n.li !== c.li && c.li < n.li) edgeAt(I.P.border, c.x, c.y, d); });
+    }
+    this.bounds = [x0, y0, x1, y1];
   }
   _layout() {
     const L = hexLayout(this.owners, this.towns); this.lay = L; this.cells = L.cells;
@@ -2774,7 +2805,7 @@ class HexWorld {
       for (const c of ring) for (const [dq, dr] of HX_DIRS) { const q = c.q + dq, r = c.r + dr, k = q + ',' + r; if (seen.has(k)) continue; seen.add(k); const [x, y] = hxPx(q, r); hexAt(P.water, x, y); next.push({ q, r }); }
       ring = next;
     }
-    this.P = P; this.bounds = [x0, y0, x1, y1]; this.adj = adj;
+    this.P = P; this.bounds = [x0, y0, x1, y1]; this._landBounds = this.bounds; this._lsig = null; this.adj = adj;
     // colours: greedy over the border graph, least-used first
     const used = new Array(HX_PALETTE.length).fill(0); this.colors = [];
     terr.forEach((t, i) => {
@@ -2829,7 +2860,7 @@ class HexWorld {
 
   /* ----- camera ----- */
   _cap(z) { return Math.min(z, 44); }
-  go(level) { this.level = level; this.hover = null; this.focus = null; this.fit(true); this.app.onWorldLevel(level); }
+  go(level) { this.level = level; this.hover = null; this.focus = null; this.libSel = null; this.fit(true); this.app.onWorldLevel(level); }
   islandOf() { return null; }
   resize() { const r = this.cv.getBoundingClientRect(), d = window.devicePixelRatio || 1; this.cv.width = Math.max(1, Math.round(r.width * d)); this.cv.height = Math.max(1, Math.round(r.height * d)); this.dpr = d; if (this.owners) this.fit(); else this.draw(); }
   _box() { if (this.level.kind === 'nation') { const t = this.byLogin.get(this.level.login); if (t && t.box) return t.box; } return this.bounds || [0, 0, 10, 10]; }
@@ -2868,25 +2899,34 @@ class HexWorld {
     cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
     cv.addEventListener('wheel', (e) => { e.preventDefault(); cancelAnimationFrame(this._af); const k = Math.exp(-e.deltaY * 0.0015); const [wx, wy] = this.U(e.offsetX, e.offsetY); this.cam.z = Math.max(this._zmin(), Math.min(80, this.cam.z * k)); const [nx, ny] = this.U(e.offsetX, e.offsetY); this.cam.x += wx - nx; this.cam.y += wy - ny; this.draw(); }, { passive: false });
   }
-  _cellAt(wx, wy) {
+  _hexOf(wx, wy) {
     const qf = (HX_SQ3 / 3) * wx - wy / 3, rf = (2 / 3) * wy, sf = -qf - rf;
     let q = Math.round(qf), r = Math.round(rf), s = Math.round(sf);
     const dq = Math.abs(q - qf), dr = Math.abs(r - rf), ds = Math.abs(s - sf);
     if (dq > dr && dq > ds) q = -r - s; else if (dr > ds) r = -q - s;
-    return this.cells.get(q + ',' + r) || null;
+    return [q, r];
   }
+  _cellAt(wx, wy) { const [q, r] = this._hexOf(wx, wy); return this.cells.get(q + ',' + r) || null; }
   _hit(sx, sy) {
     if (!this.cells) return null;
-    const [x, y] = this.U(sx, sy), c = this._cellAt(x, y); if (!c) return null;
+    const [x, y] = this.U(sx, sy);
+    if (!this.hubOnly && this.isl && this.isl.cells.size) { const [q, r] = this._hexOf(x, y), ic = this.isl.cells.get(q + ',' + r); if (ic) { const L = this.isl.libs[ic.li]; return { kind: 'lib', key: L.key, name: L.name, n: L.n }; } }
+    const c = this._cellAt(x, y); if (!c) return null;
     if (this.cam.z >= 8) return { kind: 'plot', login: c.login, repo: c.repo.name, n: c.ri + 1, q: c.q, r: c.r };
     return { kind: 'nation', login: c.login };
   }
   _click(h) {
-    if (!h) return;
+    if (!h) { if (this.libSel) { this.libSel = null; this.app.onLibrary(null); this.draw(); } return; }
+    if (h.kind === 'lib') { this.focusLib(h.key); return; }
     const open = h.kind === 'plot' && (this.cam.z >= 24 || (this.level.kind === 'nation' && this.level.login === h.login && this.cam.z >= 12));
     if (open) return this.app.openRepo(h.login, h.repo);
     if (this.level.kind === 'nation' && this.level.login === h.login && h.kind === 'plot') { this._fly({ x: this._cellXY(h)[0], y: this._cellXY(h)[1], z: this._cap(Math.max(this.cam.z * 1.8, 26)) }); return; }
     this.go({ kind: 'nation', login: h.login });
+  }
+  focusLib(key) {
+    const L = this.isl && this.isl.byKey.get(String(key).toLowerCase()); if (!L) return;
+    this.libSel = L.key; this.hover = null; this.level = { kind: 'world' }; this.focus = null;
+    this._fly({ x: L.cx, y: L.cy, z: Math.max(14, Math.min(40, this.cam.z * 1.5 || 14)) }); this.app.onLibrary(L); this.draw();
   }
   _cellXY(h) { return hxPx(h.q, h.r); }
 
@@ -2927,10 +2967,44 @@ class HexWorld {
       ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = lw(5.5); ctx.stroke(P.outline[t.oi]);
       ctx.strokeStyle = this.colors[t.oi].ink; ctx.lineWidth = lw(2.4); ctx.stroke(P.outline[t.oi]);
     }
+    if (!only && this.isl && this.isl.libs.length) this._drawIsland(ctx, z, lw);
     ctx.restore();
     // per-hex detail for what is on screen
     if (z >= 6) this._detail(W, H, z, only ? focusLogin : null);
     if (z < 36) this._labels(W, H, z, only ? focusLogin : null);
+    if (!only) this._libLabels(W, H, z);
+  }
+  _drawIsland(ctx, z, lw) {
+    const I = this.isl, GOLD = ['#E6CC7F', '#DDBE62', '#EBD596'];
+    I.libs.forEach((L, i) => { ctx.fillStyle = GOLD[i % 3]; ctx.fill(I.P.fill[i]); });
+    if (z >= 5) { ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = lw(1); ctx.stroke(I.P.grid); }
+    ctx.strokeStyle = 'rgba(255,253,246,0.95)'; ctx.lineWidth = lw(4); ctx.stroke(I.P.border); ctx.strokeStyle = 'rgba(122,94,30,0.8)'; ctx.lineWidth = lw(1.4); ctx.stroke(I.P.border);
+    ctx.strokeStyle = 'rgba(122,94,30,0.6)'; ctx.lineWidth = lw(1); ctx.stroke(I.P.coast);
+    // selected library: its users are ringed; a hood in view: dashed links across the water to the libraries it calls
+    const hex = (c) => { ctx.beginPath(); HX_CORNERS.forEach(([cx, cy], k) => (k ? ctx.lineTo(c.x + cx, c.y + cy) : ctx.moveTo(c.x + cx, c.y + cy))); ctx.closePath(); };
+    if (this.libSel) { const L = I.byKey.get(this.libSel); if (L) { ctx.strokeStyle = '#C0432C'; ctx.lineWidth = lw(3); for (const c of L.cells) { hex(c); ctx.stroke(); } this._keyCells(); for (const k of L.hoods) { const c = this._byKey.get(k); if (c) { hex(c); ctx.lineWidth = lw(2.4); ctx.stroke(); } } } }
+    const key = (this.hover && this.hover.kind === 'plot' ? (this.hover.login + '/' + this.hover.repo).toLowerCase() : null) || this.markKey;
+    if (key) { this._keyCells(); const c = this._byKey.get(key); if (c) for (const L of I.libs) if (L.hoods.includes(key)) {
+      const mx = (c.x + L.cx) / 2, my = (c.y + L.cy) / 2 - Math.hypot(L.cx - c.x, L.cy - c.y) * 0.18;
+      ctx.setLineDash([lw(6), lw(5)]); ctx.strokeStyle = 'rgba(192,67,44,0.75)'; ctx.lineWidth = lw(1.6); ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.quadraticCurveTo(mx, my, L.cx, L.cy); ctx.stroke(); ctx.setLineDash([]);
+    } }
+  }
+  _keyCells() { if (this._byKeySig === this.cells) return; this._byKeySig = this.cells; this._byKey = new Map(); for (const c of this.cells.values()) this._byKey.set((c.login + '/' + c.repo.name).toLowerCase(), c); }
+  _libLabels(W, H, z) {
+    const I = this.isl; if (!I || !I.libs.length) return;
+    const taken = [];
+    for (const L of I.libs.slice().sort((a, b) => (this.libSel === b.key) - (this.libSel === a.key) || b.n - a.n)) {
+      const [sx, sy] = this.S(L.cx, L.cy); if (sx < -80 || sx > W + 80 || sy < -40 || sy > H + 40) continue;
+      const room = Math.sqrt(L.cells.length) * 1.9 * z;
+      this.ctx.font = '700 11px system-ui, sans-serif'; const tw = this.ctx.measureText(L.name).width;
+      if (tw > room * 1.1 && this.libSel !== L.key && !(this.hover && this.hover.key === L.key)) continue;
+      const two = z >= 20, box = [sx - tw / 2 - 3, sy - 8, sx + tw / 2 + 3, sy + (two ? 19 : 8)];
+      if (taken.some((b) => box[0] < b[2] && b[0] < box[2] && box[1] < b[3] && b[1] < box[3])) continue; taken.push(box);
+      this._t(L.name, sx, sy, { w: 700, size: 11, color: '#4A3A12', halo: 'rgba(250,244,220,0.85)' });
+      if (two) this._t(L.n + ' hoods', sx, sy + 12, { size: 10, color: '#6A5522', halo: 'rgba(250,244,220,0.8)' });
+    }
+    const top = Math.min(...I.libs.flatMap((L) => L.cells.map((c) => c.y))) - 1.6, mid = (Math.min(...I.libs.flatMap((L) => L.cells.map((c) => c.x))) + Math.max(...I.libs.flatMap((L) => L.cells.map((c) => c.x)))) / 2;
+    const [tx, ty] = this.S(mid, top); if (z < 14) this._t('Libraries', tx, ty, { w: 700, size: 12, color: '#7A5E1E', halo: 'rgba(235,240,236,0.85)' });
   }
   _detail(W, H, z, only) {
     const ctx = this.ctx; const wantTown = z >= 28; const names = z >= 32;
@@ -3006,7 +3080,8 @@ class HexWorld {
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (n) => (n == null ? '–' : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k' : String(n));
   const STORE = 'githoods:v1';
-  const LAYOUT = 3; // towns built before this layout only have the street map until they are redrawn
+  const LAYOUT = 4; // the layout the town builder produces now; towns older than MIN3D only have the street map until redrawn
+  const MIN3D = 3;
 
   /* ---------- state + cache ---------- */
   const state = { owners: {}, towns: {}, tour: null, current: null, tab: 'town', mode: '3d', find: { hits: [], idx: -1 } };
@@ -3067,15 +3142,15 @@ class HexWorld {
   try { const m = localStorage.getItem('gh_mode'); if (m === 'plan' || m === '3d') state.mode = m; } catch (e) { /* storage unavailable */ }
   if (!town3d) { state.mode = 'plan'; $('#mode-3d').hidden = true; }
   const allViews = () => [townView, town3d].filter(Boolean);
-  const uses3d = (t) => !!(town3d && state.mode === '3d' && t && (t.mode === 'list' || t.v >= LAYOUT));
+  const uses3d = (t) => !!(town3d && state.mode === '3d' && t && (t.mode === 'list' || t.v >= MIN3D));
   const tv = () => (document.body.dataset.view === '3d' ? town3d : townView);
   function applyView() {
     const t = state.current, on = state.tab === 'town' && uses3d(t);
     document.body.dataset.view = uses3d(t) ? '3d' : 'plan';
     if (town3d) town3d.activate(on);
     if (!on) townView.resize();
-    $('#redraw').hidden = !(state.tab === 'town' && t && t.mode === 'code' && !(t.v >= LAYOUT));
-    $('#mode-3d').disabled = !!(t && t.mode === 'code' && !(t.v >= LAYOUT));
+    $('#redraw').hidden = !(state.tab === 'town' && t && t.mode === 'code' && !(t.v >= MIN3D));
+    $('#mode-3d').disabled = !!(t && t.mode === 'code' && !(t.v >= MIN3D));
   }
   const app = {
     onWorldLevel: (lvl) => {
@@ -3087,6 +3162,7 @@ class HexWorld {
       if (lvl.kind === 'nation') { const o = state.owners[lvl.login]; Promise.all(o.repos.map((r) => ensureTown(o.login + '/' + r.name).catch(() => null))).then(() => worldView.draw()); }
     },
     onWorldHover: (h) => renderWorldHover(h),
+    onLibrary: (L) => renderLibPanel(L),
     openRepo: (login, repo) => openKey(login + '/' + repo, true),
     needTown: (key) => { const t = state.towns[key]; if (t && t.stub && !t._asked) { t._asked = true; ensureTown(key).then(() => worldView.draw()).catch(() => { t._asked = false; }); } },
   };
@@ -3098,7 +3174,7 @@ class HexWorld {
     for (const k of ['town', 'hub', 'world']) $('#tab-' + k).setAttribute('aria-selected', tab === k);
     $('#tab-hub').disabled = !(state.hub && state.owners[state.hub]);
     if (tab === 'world' || tab === 'hub') {
-      worldView.hubOnly = tab === 'hub'; worldView.outline = tab === 'world' ? state.hub || null : null;
+      worldView.markKey = state.current ? String(state.current.key).toLowerCase() : null; worldView.hubOnly = tab === 'hub'; worldView.outline = tab === 'world' ? state.hub || null : null;
       worldView.resize(); worldView.setData(state.owners, state.towns); fillLangs();
       const L = worldView.level;
       if (tab === 'hub') { if (!(L.kind === 'nation' && L.login === state.hub)) worldView.go({ kind: 'nation', login: state.hub }); }
@@ -3212,13 +3288,19 @@ class HexWorld {
         <ol class="route">${t.route.map((st, i) => { const b = t.buildings[st.id]; const par = st.from != null ? basename(t.buildings[st.from].path) : ''; return `<li style="margin-left:${Math.min(st.depth, 4) * 12}px"><button class="link" data-step="${i}">${esc(basename(b.path))}</button> <span class="muted">${st.from == null ? verb.start : `${par} ${verb[st.how] || st.how} it`}</span>${st.libs.length ? `<br><em>uses ${st.libs.map(esc).join(', ')}</em>` : ''}${b.info && b.info.doc ? `<br><span class="muted small">${esc(b.info.doc.slice(0, 110))}${b.info.doc.length > 110 ? '…' : ''}</span>` : ''}</li>`; }).join('')}</ol>`;
     }
     if (t.mode === 'code') {
-      html += `<h3>${t.v >= LAYOUT ? 'Roads' : 'Streets'}</h3><ul class="list">${t.streets.filter((st) => !st.empty).slice(0, 10).map((st) => `<li><span title="${esc((st.carries || []).map((c) => c.path).join(', '))}">${esc(st.name)}${(st.carries || []).length ? ` <em>${esc(st.carries.map((c) => basename(c.path)).join(', '))}</em>` : ''}</span><b>${st.traffic}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
-        <h3>${t.v >= LAYOUT ? 'Terminals' : 'Outside the walls'}</h3><ul class="list">${t.clearings.map((c) => `<li><span>${esc(c.name)}${c.label ? ` <em>${esc(c.label)}</em>` : ''}${c.trail ? ' <em>build trail</em>' : ''}</span><b>${c.uses}</b></li>`).join('') || '<li class="muted">None.</li>'}</ul>`;
+      if (t.v >= 4) {
+        const dn = (id) => { const d = t.districts.find((x) => x.id === id); return d ? (d.civic ? 'Civic center' : d.label) : ''; };
+        html += `<h3>Wires</h3><ul class="list">${(t.wires || []).slice(0, 10).map(([a, c, n]) => `<li><span>${esc(dn(a))} <em>and</em> ${esc(dn(c))}</span><b>${n}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
+        <h3>Libraries (gates)</h3><ul class="list">${t.clearings.map((c) => `<li><span>${esc(c.name)}${c.label ? ` <em>${esc(c.label)}</em>` : ''}</span><b>${c.uses}</b></li>`).join('') || '<li class="muted">None.</li>'}</ul>`;
+      } else {
+            html += `<h3>${t.v >= MIN3D ? 'Roads' : 'Streets'}</h3><ul class="list">${t.streets.filter((st) => !st.empty).slice(0, 10).map((st) => `<li><span title="${esc((st.carries || []).map((c) => c.path).join(', '))}">${esc(st.name)}${(st.carries || []).length ? ` <em>${esc(st.carries.map((c) => basename(c.path)).join(', '))}</em>` : ''}</span><b>${st.traffic}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
+        <h3>${t.v >= MIN3D ? 'Terminals' : 'Outside the walls'}</h3><ul class="list">${t.clearings.map((c) => `<li><span>${esc(c.name)}${c.label ? ` <em>${esc(c.label)}</em>` : ''}${c.trail ? ' <em>build trail</em>' : ''}</span><b>${c.uses}</b></li>`).join('') || '<li class="muted">None.</li>'}</ul>`;
+      }
     } else {
       html += `<h3>Grid</h3>
         <ul class="list">${t.grid.cols.slice(0, 12).map((c) => `<li><span>${esc(c.name)}</span><b>${c.n}</b></li>`).join('')}</ul>`;
     }
-    if (t.mode === 'code' && t.order != null && !(t.v >= LAYOUT)) html += `<h3>Street plan</h3><p class="muted">${t.order > 0.6 ? 'Planned grid' : t.order > 0.3 ? 'Partly planned' : 'Winding old hood'} (order ${t.order.toFixed(2)}). Even folder depths and file sizes make a grid; uneven ones make winding streets.</p>`;
+    if (t.mode === 'code' && t.order != null && !(t.v >= MIN3D)) html += `<h3>Street plan</h3><p class="muted">${t.order > 0.6 ? 'Planned grid' : t.order > 0.3 ? 'Partly planned' : 'Winding old hood'} (order ${t.order.toFixed(2)}). Even folder depths and file sizes make a grid; uneven ones make winding streets.</p>`;
     html += `<h3>History</h3><p class="muted">${t.rings} ring${t.rings === 1 ? '' : 's'} of growth (commits), ${t.visitors.length} visitor${t.visitors.length === 1 ? '' : 's'} (stars), ${t.cranes.length} crane${t.cranes.length === 1 ? '' : 's'} (open issues)${s.created ? `, founded ${esc(s.created.slice(0, 10))}` : ''}.</p>`;
     if (t.notes && t.notes.length) html += `<p class="note">${t.notes.map(esc).join('<br>')}</p>`;
     $('#summary').innerHTML = html;
@@ -3253,7 +3335,7 @@ class HexWorld {
     } else if (hit.type === 'district') {
       const d = hit.d; h = `<h4>${esc(d.label)}</h4><p class="path">${esc(d.key || '/')}</p><dl class="stats small"><div><dt>Buildings</dt><dd>${d.bcount}</dd></div><div><dt>Files</dt><dd>${fmt(d.files)}</dd></div><div><dt>Lines</dt><dd>${fmt(d.lines)}</dd></div><div><dt>Main language</dt><dd>${esc(LANG_NAMES[d.lang] || d.lang || '–')}</dd></div></dl>`;
     } else if (hit.type === 'clearing') {
-      const c = hit.c; h = `<h4>${esc(c.name)}</h4><p><b>${c.label ? esc(c.label) : 'Outside library'}</b>${c.std ? ' · standard library' : ''}${c.trail ? ' · build or dev only' : ''}</p><p>${c.uses} import${c.uses === 1 ? '' : 's'} from this town.</p>`;
+      const c = hit.c; h = `<h4>${esc(c.name)}</h4><p><b>${c.label ? esc(c.label) : 'Outside library'}</b>${c.std ? ' · standard library' : ''}${c.trail ? ' · build or dev only' : ''}</p><p>${c.uses} import${c.uses === 1 ? '' : 's'} from this town.</p><p><button class="btn small" data-lib="${esc(c.name)}">Show on the world map</button></p>`;
     }
     el.innerHTML = h;
   }
@@ -3305,8 +3387,14 @@ class HexWorld {
     }
     $('#summary').innerHTML = h; $('#inspector').innerHTML = '';
   }
+  function renderLibPanel(L) {
+    if (!L) { renderWorldPanel(worldView.level); return; }
+    const rows = L.hoods.map((k) => state.towns[k]).filter(Boolean).slice(0, 40).map((t) => `<li><span><button data-open="${esc(t.owner + '/' + t.repo)}" class="linkish">${esc(t.owner + '/' + t.repo)}</button></span></li>`).join('');
+    $('#summary').innerHTML = `<h2>${esc(L.name)}</h2><p class="arch"><b>Library</b> · shared by ${L.n} hoods</p><h3>Used by</h3><ul class="list">${rows}</ul>`; $('#inspector').innerHTML = '';
+  }
   function renderWorldHover(hh) {
     const el = $('#inspector'); if (!hh) { el.innerHTML = ''; return; }
+    if (hh.kind === 'lib') { el.innerHTML = `<h4>${esc(hh.name)}</h4><p>Library · used by ${hh.n} hoods. Tap to see them.</p>`; return; }
     if (hh.kind === 'plot') { const o = state.owners[hh.login]; const r = o.repos.find((x) => x.name === hh.repo); const t = state.towns[(hh.login + '/' + hh.repo).toLowerCase()];
       const n = hh.n || (o.repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0)).indexOf(r) + 1);
       el.innerHTML = `<h4>${esc(hh.repo)}</h4><p>${esc(hh.login)} · plot #${n}${r.created ? ' · granted ' + esc(r.created.slice(0, 10)) : ''}</p><p>${t ? `<b>${esc(t.archetype.name)}</b>` : r.size === 0 ? 'Empty plot' : 'Fogged. Tap to scan and build.'}</p>${r.lang ? `<p class="muted">${esc(r.lang)}${r.stars ? ' · ' + fmt(r.stars) + ' stars' : ''}</p>` : ''}`; }
@@ -3356,7 +3444,8 @@ class HexWorld {
     const tn = e.target.closest('[data-tour]'); if (tn) { const a = tn.dataset.tour; if (a === 'end') endTour(); else goStep(state.tour + (a === 'next' ? 1 : -1)); return; }
     const sb = e.target.closest('[data-step]');
     if (sb && state.current) { goStep(+sb.dataset.step); return; }
-    const b = e.target.closest('[data-go],[data-open],[data-nation],[data-town]'); if (!b) return;
+    const b = e.target.closest('[data-go],[data-open],[data-nation],[data-town],[data-lib]'); if (!b) return;
+    if (b.dataset.lib) { setTab('world'); worldView.focusLib(b.dataset.lib); return; }
     if (b.dataset.go === 'world') worldView.go({ kind: 'world' });
     else if (b.dataset.nation) worldView.go({ kind: 'nation', login: b.dataset.nation });
     else if (b.dataset.open) { const [o, r] = b.dataset.open.split('/'); app.openRepo(o, r); }
