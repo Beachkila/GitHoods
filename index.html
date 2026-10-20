@@ -33,11 +33,11 @@ button{font:inherit;color:inherit;cursor:pointer}
 #crumbs{display:none;gap:6px;align-items:center}
 #crumbs button{border:0;background:none;color:var(--accent);padding:0;text-decoration:underline}
 #crumbs i{color:var(--soft);font-style:normal}
-body[data-tab="world"] #crumbs{display:flex} body[data-tab="world"] #modes{display:none}
+body[data-tab="world"] #modes,body[data-tab="hub"] #modes{display:none}.seg button:disabled{opacity:.4;cursor:default}
 main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 340px;min-height:0}
 .stage{position:relative;min-height:0}
 canvas{position:absolute;inset:0;width:100%;height:100%;touch-action:none;display:block}
-#world-canvas{display:none} body[data-tab="world"] #world-canvas{display:block} body[data-tab="world"] #town-canvas{display:none}
+#world-canvas{display:none} body[data-tab="world"] #world-canvas,body[data-tab="hub"] #world-canvas{display:block} body[data-tab="world"] #town-canvas,body[data-tab="hub"] #town-canvas{display:none}
 .zoom{position:absolute;right:12px;bottom:12px;display:flex;flex-direction:column;gap:4px}
 .zoom button{width:34px;height:34px;border-radius:8px;border:1px solid #CDBB98;background:#FBF6EC;color:#3B2A1A;font-size:16px}
 aside{border-left:1px solid var(--line);background:var(--panel);overflow:auto;padding:14px 16px 24px;min-width:0}
@@ -61,7 +61,7 @@ aside h4{margin:0 0 4px;font-size:15px;word-break:break-word}
 .list em{font-style:normal;font-size:11px;color:var(--accent);margin-left:4px}
 .link{border:0;background:none;padding:0;color:var(--accent);text-align:left}
 .find-wrap{margin-bottom:10px}
-body[data-tab="world"] .find-wrap{display:none}
+body[data-tab="world"] .find-wrap,body[data-tab="hub"] .find-wrap{display:none}
 #find{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--input);color:var(--ink);font:inherit}
 #find-results li{border-bottom:1px dashed var(--line)}
 #inspector h5{margin:10px 0 4px;font-size:12px;color:var(--soft);font-weight:600}
@@ -101,7 +101,7 @@ dialog input{width:100%;padding:8px;border:1px solid var(--line);border-radius:8
 dialog menu{display:flex;gap:8px;justify-content:flex-end;padding:0;margin:12px 0 0;flex-wrap:wrap}
 .view3d{position:absolute;inset:0;background:#EFEEEA}
 .view3d canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}
-body[data-view="3d"] #town-canvas{display:none} body[data-tab="world"] #town-3d{display:none}
+body[data-view="3d"] #town-canvas{display:none} body[data-tab="world"] #town-3d,body[data-tab="hub"] #town-3d{display:none}
 .only3d{display:none} body[data-view="3d"][data-tab="town"] .only3d{display:block}
 .labels3d{position:absolute;inset:0;pointer-events:none;overflow:hidden}
 .l3{position:absolute;left:0;top:0;white-space:nowrap;font:600 11px system-ui,-apple-system,"Segoe UI",sans-serif;letter-spacing:.14em;text-transform:uppercase;color:#2E2E2C;text-shadow:0 0 3px #EFEEEA,0 0 3px #EFEEEA,0 0 6px #EFEEEA}
@@ -109,6 +109,7 @@ body[data-view="3d"] #town-canvas{display:none} body[data-tab="world"] #town-3d{
 .l3.lib{font-weight:500;color:#6B6A66;font-size:10px}
 .l3.street{font-size:9.5px;color:#55534E;letter-spacing:.08em}
 .l3.file{text-transform:none;letter-spacing:0;font-weight:600;font-size:10.5px;line-height:15px;color:#2E2E2C;background:#FFFFFFE8;border:1px solid #D2CFC6;border-radius:4px;padding:0 6px;text-shadow:none;box-shadow:0 1px 2px #0000001A}
+.l3.file{overflow:visible}.l3.file::after{content:'';position:absolute;left:var(--lx,0);top:100%;width:1px;height:var(--ly,10px);background:#8A867C}
 .l3.file.hot{color:#fff;background:#C0432C;border-color:#C0432C}
 .tour-nav{display:flex;gap:6px;margin-top:8px} .tour-nav button{flex:1}
 .l3.stop{width:20px;height:20px;border-radius:50%;background:#C0432C;color:#fff;text-align:center;letter-spacing:0;text-shadow:none;font:700 11px/20px system-ui,sans-serif}
@@ -123,7 +124,7 @@ body[data-view="3d"] #town-canvas{display:none} body[data-tab="world"] #town-3d{
 #find-results li.on button{font-weight:700}
 #find-results .more{font-size:12px;color:var(--soft);border:0}
 .mapbar{position:absolute;left:12px;top:12px;right:64px;display:none;gap:6px;z-index:2;pointer-events:none}
-body[data-tab="world"] .mapbar{display:flex}
+body[data-tab="world"] .mapbar,body[data-tab="hub"] .mapbar{display:flex}
 .mapbar>*{pointer-events:auto}
 .mapfind{position:relative;flex:0 1 280px;min-width:0}
 .mapbar input,.mapbar select{padding:7px 10px;border:1px solid #CDBB98;border-radius:8px;background:#FBF6EC;color:#3B2A1A;font:inherit;max-width:100%}
@@ -149,7 +150,7 @@ body[data-tab="world"] .mapbar{display:flex}
   <form id="form" autocomplete="off"><input id="q" placeholder="owner/repo, a GitHub link, or an owner" aria-label="Repository or owner" spellcheck="false" autocapitalize="off"><button class="btn" id="scan" type="submit">Scan</button><button class="ghost" id="gear" type="button" title="Settings" aria-label="Settings">⚙</button></form>
 </header>
 <div class="bar">
-  <div class="seg" role="tablist"><button id="tab-town" role="tab" aria-selected="true">Hood</button><button id="tab-world" role="tab" aria-selected="false">World</button></div>
+  <div class="seg" role="tablist"><button id="tab-town" role="tab" aria-selected="true">Hood</button><button id="tab-hub" role="tab" aria-selected="false" disabled>Hub</button><button id="tab-world" role="tab" aria-selected="false">World</button></div>
   <div class="seg" id="modes"><button id="mode-3d" aria-pressed="true">3D</button><button id="mode-plan" aria-pressed="false">Street map</button></div>
   <nav id="crumbs"></nav>
   <div id="progress"></div>
@@ -1078,22 +1079,28 @@ function buildTown(scan) {
   const pair = new Map(); for (const [k, n] of dEdges) { const [a, c] = k.split('>').map(Number); const kk = Math.min(a, c) + '|' + Math.max(a, c); pair.set(kk, (pair.get(kk) || 0) + n); }
   const trade = (a, c) => pair.get(Math.min(a, c) + '|' + Math.max(a, c)) || 0;
   const dOrder = districts.map((g) => g.id).sort((a, b) => (inbound.get(b) || 0) - (inbound.get(a) || 0) || a - b);
-  const GAP = 3;
+  // a road lane only where a real import joins two districts; otherwise they sit one tile apart
+  const thr = Math.max(1, totalTraffic * 0.004);
+  const gapOf = (a, c) => (trade(a, c) >= thr ? 3 : 1);
   const placed = [];
   for (const id of dOrder) {
     const B = blocks.get(id);
     if (!placed.length) { B.x0 = 0; B.y0 = 0; placed.push(id); continue; }
     let best = null, bestS = Infinity;
-    const free = (x0, y0) => placed.every((pid) => { const P = blocks.get(pid); return x0 + B.w + GAP <= P.x0 || P.x0 + P.w + GAP <= x0 || y0 + B.h + GAP <= P.y0 || P.y0 + P.h + GAP <= y0; });
+    const free = (x0, y0) => placed.every((pid) => { const P = blocks.get(pid), GAP = gapOf(id, pid); return x0 + B.w + GAP <= P.x0 || P.x0 + P.w + GAP <= x0 || y0 + B.h + GAP <= P.y0 || P.y0 + P.h + GAP <= y0; });
     for (const pid of placed) {
-      const P = blocks.get(pid);
+      const P = blocks.get(pid), GAP = gapOf(id, pid);
       const spots = [];
       for (let o = -B.h + 1; o < P.h; o++) { spots.push([P.x0 + P.w + GAP, P.y0 + o], [P.x0 - GAP - B.w, P.y0 + o]); }
       for (let o = -B.w + 1; o < P.w; o++) { spots.push([P.x0 + o, P.y0 + P.h + GAP], [P.x0 + o, P.y0 - GAP - B.h]); }
       for (const [x0, y0] of spots) {
         if (!free(x0, y0)) continue;
         const cx = x0 + B.w / 2, cy = y0 + B.h / 2;
-        let s = 0.35 * (Math.abs(cx) + Math.abs(cy));
+        let s = 0.15 * (Math.abs(cx) + Math.abs(cy));
+        // keep the whole district a compact rectangle: penalise the bounding box it would make
+        let bx0 = x0, by0 = y0, bx1 = x0 + B.w, by1 = y0 + B.h;
+        for (const q of placed) { const Q = blocks.get(q); bx0 = Math.min(bx0, Q.x0); by0 = Math.min(by0, Q.y0); bx1 = Math.max(bx1, Q.x0 + Q.w); by1 = Math.max(by1, Q.y0 + Q.h); }
+        s += 1.6 * ((bx1 - bx0) + (by1 - by0)) + 0.6 * Math.abs((bx1 - bx0) - (by1 - by0));
         for (const q of placed) { const Q = blocks.get(q); const w = trade(id, q); if (w) s += Math.log2(1 + w) * 2 * (Math.abs(cx - (Q.x0 + Q.w / 2)) + Math.abs(cy - (Q.y0 + Q.h / 2))); }
         s += rnd() * 0.01;
         if (s < bestS) { bestS = s; best = [x0, y0]; }
@@ -1122,7 +1129,7 @@ function buildTown(scan) {
     return { name: e.name, uses: e.n, kind: e.lm ? e.lm.key : null, label: e.lm ? e.lm.label : null, from, users: users.slice(0, 8), trail: dev && e.n === 0, std: e.std, r: Math.min(1.5, 1.0 + 0.15 * Math.log2(1 + e.n)) };
   });
   // each sits on the town's outer ring, on the side facing its district, kept apart from its neighbours
-  const OUTSET = 3.5;
+  const OUTSET = 2.2;
   const ringPoint = (ang) => { const hx = (TB.x1 - TB.x0) / 2 + OUTSET, hy = (TB.y1 - TB.y0) / 2 + OUTSET; const c = Math.cos(ang), s = Math.sin(ang); const k = Math.min(hx / (Math.abs(c) || 1e-6), hy / (Math.abs(s) || 1e-6)); return [tcx + c * k, tcy + s * k]; };
   clearings.forEach((c) => { const B = blocks.get(c.from); c.ang = Math.atan2(B.y0 + B.h / 2 - tcy, B.x0 + B.w / 2 - tcx) || 0; });
   clearings.sort((a, b) => a.ang - b.ang);
@@ -1184,7 +1191,7 @@ function buildTown(scan) {
     if (linked.has(id)) continue;
     const [x, y] = centerOf(id);
     const near = [...linked].sort((p, q) => { const P = centerOf(p), Q = centerOf(q); return Math.abs(P[0] - x) + Math.abs(P[1] - y) - Math.abs(Q[0] - x) - Math.abs(Q[1] - y); })[0];
-    if (near != null) links.push({ a: id, c: near, n: 0 });
+    // loners are tucked against a neighbour, with no trail
     linked.add(id);
   }
   for (const s of links) {
@@ -1274,7 +1281,7 @@ function buildTown(scan) {
   const craneable = buildings.filter((b) => !['stake', 'fence', 'plaque', 'trash', 'hut', 'hutcluster', 'yard'].includes(b.kind) && !b.special).sort((a, b) => hashStr(a.path) - hashStr(b.path));
   for (let i = 0; i < nCr && i < craneable.length; i++) cranes.push(craneable[i].id);
 
-  const ringPad = 1.2 + rings * 0.7;
+  const ringPad = 2.0; // rings are thin lines in a fixed band, so more commits means more lines, not more space
   const core = { x0: TB.x0 - 1.5, y0: TB.y0 - 1.5, x1: TB.x1 + 1.5, y1: TB.y1 + 1.5 };
   const xs = [core.x0 - ringPad, core.x1 + ringPad, ...clearings.map((c) => c.x - c.r - 1), ...clearings.map((c) => c.x + c.r + 1)];
   const ys = [core.y0 - ringPad, core.y1 + ringPad, ...clearings.map((c) => c.y - c.r - 1), ...clearings.map((c) => c.y + c.r + 1.6)];
@@ -2215,9 +2222,25 @@ class Town3D {
     // every building must stand on the ground under it
     this.groundErrors = this._bs.filter((B) => B && (B.minY < B.gz - 0.002 || B.minY > B.gz + 0.02)).map((B) => B.b.path);
   }
+  // district name: small lowercase text lying on the ground along the block's south edge, wrapped to the block's width
+  _flatName(d, pave) {
+    const B = d.block, wU = Math.max(1.2, B.x1 - B.x0 - 0.4), hU = 1.0, K = 56;
+    const cv = document.createElement('canvas'); cv.width = Math.ceil(wU * K); cv.height = Math.ceil(hU * K);
+    const c = cv.getContext('2d'); const txt = String(d.label || '').toLowerCase();
+    let fs = 0.42 * K; const font = (n) => `600 ${n}px system-ui,-apple-system,"Segoe UI",sans-serif`;
+    const wrap = () => { c.font = font(fs); const words = txt.split(/(?<=[\s\/-])/); const lines = []; let cur = ''; for (const w of words) { if (cur && c.measureText(cur + w).width > cv.width - 6) { lines.push(cur.trim()); cur = w; } else cur += w; } if (cur) lines.push(cur.trim()); return lines; };
+    let lines = wrap(); while ((lines.length > 2 || lines.some((l) => c.measureText(l).width > cv.width - 6)) && fs > 0.22 * K) { fs -= 2; lines = wrap(); }
+    c.font = font(fs); c.fillStyle = 'rgba(58,50,40,0.85)'; c.textBaseline = 'middle';
+    const lh = fs * 1.15, y0 = cv.height - (lines.length * lh) / 2 - 3;
+    lines.forEach((l, i) => c.fillText(l, 3, y0 + (i - (lines.length - 1)) * lh));
+    const tex = new THREE.CanvasTexture(cv); tex.anisotropy = 4;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(wU, hU), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+    m.rotation.x = -Math.PI / 2; m.position.set(B.x0 + 0.2 + wU / 2, pave + 0.02, B.y1 - hU / 2); m.renderOrder = 2;
+    this._add(m);
+  }
   _buildCode(t, ground, city) {
     const pave = t.pave || 0.08;
-    const bx = t.bounds, pad = 2;
+    const bx = t.bounds, pad = 1;
     const G = kit3(ground, 0, 0, 0);
     // the land: a slab with the outside world a shade greener than the town
     const X0 = Math.floor(bx.x0 - pad), Y0 = Math.floor(bx.y0 - pad), X1 = Math.ceil(bx.x1 + pad), Y1 = Math.ceil(bx.y1 + pad);
@@ -2225,12 +2248,13 @@ class Town3D {
     G.plane(X0 + 0.01, Y0 + 0.01, X1 - 0.01, Y1 - 0.01, 0.002, AX.outside);
     const c = t.core; G.plane(c.x0, c.y0, c.x1, c.y1, 0.004, t.archived ? 0xDEDCD5 : AX.ground);
     // growth rings: one contour per few commits, around the town
-    for (let k = 1; k <= t.rings; k++) { const o = 0.6 + k * 0.7; const p = [[c.x0 - o, c.y0 - o, 0.006], [c.x1 + o, c.y0 - o, 0.006], [c.x1 + o, c.y1 + o, 0.006], [c.x0 - o, c.y1 + o, 0.006]]; G.path([...p, p[0]], 'soft'); }
+    for (let k = 1; k <= t.rings; k++) { const o = 0.45 + k * 0.2; const p = [[c.x0 - o, c.y0 - o, 0.006], [c.x1 + o, c.y0 - o, 0.006], [c.x1 + o, c.y1 + o, 0.006], [c.x0 - o, c.y1 + o, 0.006]]; G.path([...p, p[0]], 'soft'); }
     // district blocks: pavement raised a little, tinted by what the district does
     for (const d of t.districts) {
       const B = d.block; G.box(B.x0, B.y0, 0, B.x1 - B.x0, B.y1 - B.y0, pave, AX.pave, 'soft');
       const tint = d.civic ? AX.tint.civic : AX.tint[d.role] || AX.tint.other;
       G.plane(B.x0 + 0.3, B.y0 + 0.3, B.x1 - 0.3, B.y1 - 0.3, pave + 0.003, tint);
+      if (d.bcount) this._flatName(d, pave);
     }
     // roads: one tile each, arms toward their neighbours, width from the imports they carry
     const width = (tr) => 0.3 + Math.min(0.48, 0.12 * Math.log2(1 + tr));
@@ -2265,7 +2289,7 @@ class Town3D {
     // trees on open ground, never on a road, a block or a terminal
     const occ = new Set(); for (const [x, y] of t.roads || []) for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) occ.add((x + dx) + ',' + (y + dy));
     const inBlock = (x, y) => t.districts.some((d) => x > d.block.x0 - 0.5 && x < d.block.x1 + 0.5 && y > d.block.y0 - 0.5 && y < d.block.y1 + 0.5);
-    const ro = 0.6 + (t.rings || 1) * 0.7 + 0.5, cc = t.core;
+    const ro = 0.45 + (t.rings || 1) * 0.2 + 0.4, cc = t.core;
     const inRings = (x, y) => !!cc && x > cc.x0 - ro && x < cc.x1 + ro && y > cc.y0 - ro && y < cc.y1 + ro;
     const nearC = (x, y) => t.clearings.some((cl) => Math.hypot(cl.x - x, cl.y - y) < cl.r + 0.7) || (t.visitors || []).some(([vx, vy]) => Math.hypot(vx - x, vy - y) < 0.4);
     const rr = rng(hashStr(t.key + ':trees')); const area = (X1 - X0) * (Y1 - Y0); const groups = Math.min(110, Math.round(area / 24));
@@ -2349,7 +2373,6 @@ class Town3D {
     const t = this.town; this._static = [];
     const add = (text, x, y, z, cls) => { const el = document.createElement('div'); el.className = 'l3 ' + (cls || ''); el.textContent = text; this.labels.appendChild(el); this._static.push({ el, v: new THREE.Vector3(x, z, y) }); };
     if (t.mode === 'list') { for (const r of t.grid.rows) if (r.n >= 6) add(r.name, -0.4, r.y + t.grid.RH / 2, 0.1, 'street end'); t.grid.cols.forEach((c) => add(c.name, c.x + t.grid.CW / 2, -0.8, 0.1, 'district')); add('README library', t.W / 2, t.H + 1.25, 2.1, 'district'); return; }
-    for (const d of t.districts) if (d.bcount) add(d.label, d.labelAt.x, d.labelAt.y, 0.1, 'district');
     for (const c of t.clearings) add(c.name, c.x, c.y + c.r + 0.6, 0.05, 'lib');
     for (const s of t.streets || []) if (s.name && !s.empty && s.path && s.path.length > 3) { const p = s.path[Math.floor(s.path.length / 2)]; add(s.name, p[0] + 0.5, p[1] + 0.5, 0.05, 'street'); }
   }
@@ -2371,21 +2394,60 @@ class Town3D {
     const lit = new Set(this.matches.map((b) => b.id)); const sel = this.pinned || this.hover; if (sel && sel.type === 'building') lit.add(sel.b.id);
     if (this.routeStep != null && t.route && t.route[this.routeStep]) lit.add(t.route[this.routeStep].id);
     const onRoute = new Set(this.showRoute ? (t.route || []).map((s) => s.id) : []);
+    // names: strip each district's shared prefix, fold identical names, label look-alike files once
+    if (this._nmFor !== t) {
+      this._nmFor = t; this._short = new Map(); this._grp = new Map();
+      const by = new Map(); for (const b of t.buildings) { if (!by.has(b.district)) by.set(b.district, []); by.get(b.district).push(b); }
+      const media = /\.(png|jpe?g|gif|svg|webp|ico|bmp|avif|mp4|mov|webm|mp3|wav|ogg|ttf|otf|woff2?|pdf)$/i;
+      for (const [dist, arr] of by) {
+        let pre = arr.length > 2 ? arr[0].name : '';
+        for (const b of arr) { let k = 0; while (k < pre.length && k < b.name.length && pre[k] === b.name[k]) k++; pre = pre.slice(0, k); }
+        const cut = Math.max(pre.lastIndexOf('-'), pre.lastIndexOf('_'), pre.lastIndexOf('.'), pre.lastIndexOf(' '));
+        pre = cut >= 2 ? pre.slice(0, cut + 1) : '';
+        const exts = new Map();
+        for (const b of arr) {
+          let nm = pre && b.name.length > pre.length ? b.name.slice(pre.length) : b.name; if (nm.length > 20) nm = nm.slice(0, 10) + '…' + nm.slice(-8);
+          this._short.set(b.id, nm);
+          if (media.test(b.name)) { const e = b.name.split('.').pop().toLowerCase(); if (!exts.has(e)) exts.set(e, []); exts.get(e).push(b); }
+        }
+        for (const [e, list] of exts) if (list.length >= 6) { const g = { list, n: list.length, e }; for (const b of list) this._grp.set(b.id, g); }
+      }
+    }
     const want = [];
-    for (const b of t.buildings) { const B = this._bs[b.id]; if (!B) continue; const hot = lit.has(b.id); const px = Math.max(b.w || 0.3, b.d || 0.3) * ppu; if (!hot && (this.matches.length || px < 30)) continue; want.push({ b, B, hot, px, rt: onRoute.has(b.id) ? 1 : 0, imp: ((t._in && t._in.get(b.id)) || []).length }); }
-    // most useful names first: lit, on the route, then the most imported, then the biggest; the rest only where there is room
+    for (const b of t.buildings) { const B = this._bs[b.id]; if (!B) continue; const hot = lit.has(b.id); const px = Math.max(b.w || 0.3, b.d || 0.3) * ppu; if (!hot && (this.matches.length || px < 18)) continue; want.push({ b, B, hot, px, rt: onRoute.has(b.id) ? 1 : 0, imp: ((t._in && t._in.get(b.id)) || []).length }); }
     want.sort((a, c) => (c.hot - a.hot) || (c.rt - a.rt) || (c.imp - a.imp) || (c.b.lines || 0) - (a.b.lines || 0));
     const stops = new Map((this._routeStops || []).map((s) => [s.b.id, s.i]));
-    let used = 0;
+    let used = 0, shown = 0;
+    const cap = Math.min(12, Math.max(5, Math.round(ppu / 6)));
+    const seen = new Set(), doneGrp = new Set();
     const pool = this._labelPool;
     const get = (i) => { if (!pool[i]) { const el = document.createElement('div'); this.labels.appendChild(el); pool[i] = el; } return pool[i]; };
     for (const it of want) {
-      if (used >= 70) break;
-      const [x, y0, on] = proj(new THREE.Vector3(it.b.x, it.B.box.max.y + 0.1, it.b.y)); if (!on) continue;
-      const nm = it.b.name; const name = nm.length > 22 ? nm.slice(0, 13) + '…' + nm.slice(-8) : nm; const w = name.length * 6.4 + 14, y = Math.max(12, y0 - 14);
-      const cx = Math.max(w / 2 + 3, Math.min(W - w / 2 - 3, x));
-      if (!it.hot && !it.rt && !free(cx, y, w, 18)) continue;
-      const el = get(used++); el.className = 'l3 file' + (it.hot ? ' hot' : ''); el.textContent = name; el.hidden = false; el.style.transform = `translate(${cx}px, ${y}px) translate(-50%, -50%)`; taken.push([cx, y, w, 18]);
+      if (used >= 40) break;
+      const strong = it.hot || it.rt;
+      if (!strong && shown >= cap) break;
+      const g = this._grp.get(it.b.id); let text, at = it.b, top = it.B.box.max.y + 0.1;
+      if (g && !it.hot) {
+        if (doneGrp.has(g)) continue; doneGrp.add(g);
+        const cx0 = g.list.reduce((a, b) => a + b.x, 0) / g.n, cy0 = g.list.reduce((a, b) => a + b.y, 0) / g.n;
+        text = (g.e === 'mp4' || g.e === 'mov' || g.e === 'webm' ? 'Video' : /^(ttf|otf|woff2?)$/.test(g.e) ? 'Fonts' : /^(mp3|wav|ogg)$/.test(g.e) ? 'Audio' : g.e === 'pdf' ? 'PDFs' : 'Images') + ' · ' + g.n + ' files'; at = { x: cx0, y: cy0 };
+      } else {
+        const key = it.b.district + '|' + this._short.get(it.b.id);
+        if (seen.has(key) && !it.hot) continue; seen.add(key);
+        const same = t.buildings.filter((o) => o.district === it.b.district && this._short.get(o.id) === this._short.get(it.b.id)).length;
+        text = this._short.get(it.b.id) + (same > 1 ? ' ×' + same : '');
+      }
+      const [x, y0, on] = proj(new THREE.Vector3(at.x, top, at.y)); if (!on) continue;
+      const w = text.length * 6.3 + 14, h = 19;
+      let placed = null;
+      for (const [dx, dy] of [[6, -12], [-6 - w, -12], [6, -34], [-6 - w, -34], [6, 8]]) {
+        const lx = Math.max(3, Math.min(W - w - 3, x + dx)), ty = Math.max(h / 2 + 2, y0 + dy);
+        if (free(lx + w / 2, ty, w, h)) { placed = [lx, ty]; break; }
+      }
+      if (!placed) { if (!strong) continue; placed = [Math.max(3, Math.min(W - w - 3, x + 6)), Math.max(h / 2 + 2, y0 - 12)]; }
+      const el = get(used++); el.className = 'l3 file' + (it.hot ? ' hot' : ''); el.textContent = text; el.hidden = false;
+      el.style.setProperty('--lx', Math.max(0, Math.min(w - 2, x - placed[0])) + 'px'); el.style.setProperty('--ly', Math.max(4, y0 - placed[1] - h / 2) + 'px');
+      el.style.transform = `translate(${placed[0]}px, ${placed[1]}px) translate(0, -50%)`; taken.push([placed[0] + w / 2, placed[1], w, h]); shown++;
     }
     // route stops: numbered discs over each building on the route
     for (const [id, i] of stops) {
@@ -2840,39 +2902,44 @@ class HexWorld {
     this._builtPaths();
     const P = this.P, lw = (px) => px / z;
     const focusLogin = this.level.kind === 'nation' ? this.level.login : null;
+    const only = !!(this.hubOnly && focusLogin); // Hub tab: show this owner's hexes alone
+    const outlineLogin = focusLogin || this.outline || null; // World tab: the current hub stays outlined
     const hovLogin = this.hover ? this.hover.login : null;
     ctx.save(); ctx.translate(W / 2 - this.cam.x * z, H / 2 - this.cam.y * z); ctx.scale(z, z); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
     // faint empty tiles around the land
-    if (z >= 4) { ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = lw(1); ctx.stroke(P.water); }
+    if (z >= 4 && !only) { ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = lw(1); ctx.stroke(P.water); }
     // territories
-    this.terr.forEach((t, i) => { ctx.fillStyle = this.colors[i].base; ctx.fill(P.fill[i]); ctx.fillStyle = this.colors[i].built; ctx.fill(this.builtP[i]); });
+    this.terr.forEach((t, i) => { if (only && t.login !== focusLogin) return; ctx.fillStyle = this.colors[i].base; ctx.fill(P.fill[i]); ctx.fillStyle = this.colors[i].built; ctx.fill(this.builtP[i]); });
     // inner hex lines and flower seams
     if (z >= 5) { ctx.strokeStyle = `rgba(255,255,255,${z >= 14 ? 0.5 : 0.32})`; ctx.lineWidth = lw(1); ctx.stroke(P.grid); }
     // dim everything that is not in focus or not the chosen language
     const veil = 'rgba(232,230,222,0.62)';
-    if (focusLogin) this.terr.forEach((t, i) => { if (t.login !== focusLogin) { ctx.fillStyle = veil; ctx.fill(P.fill[i]); } });
-    const dp = this._dimPath(); if (dp) { ctx.fillStyle = veil; ctx.fill(dp); }
+    if (focusLogin && !only) this.terr.forEach((t, i) => { if (t.login !== focusLogin) { ctx.fillStyle = veil; ctx.fill(P.fill[i]); } });
+    const dp = only ? null : this._dimPath(); if (dp) { ctx.fillStyle = veil; ctx.fill(dp); }
     // borders between territories: a pale glow under a dark thread; the coast gets a stronger outline
-    ctx.strokeStyle = 'rgba(255,253,246,0.95)'; ctx.lineWidth = lw(4.2); ctx.stroke(P.border);
-    ctx.strokeStyle = 'rgba(74,62,48,0.72)'; ctx.lineWidth = lw(1.5); ctx.stroke(P.border);
-    ctx.strokeStyle = 'rgba(74,62,48,0.55)'; ctx.lineWidth = lw(1); ctx.stroke(P.coast);
-    for (const login of new Set([focusLogin, hovLogin])) {
+    if (!only) {
+      ctx.strokeStyle = 'rgba(255,253,246,0.95)'; ctx.lineWidth = lw(4.2); ctx.stroke(P.border);
+      ctx.strokeStyle = 'rgba(74,62,48,0.72)'; ctx.lineWidth = lw(1.5); ctx.stroke(P.border);
+      ctx.strokeStyle = 'rgba(74,62,48,0.55)'; ctx.lineWidth = lw(1); ctx.stroke(P.coast);
+    }
+    for (const login of new Set([outlineLogin, only ? null : hovLogin])) {
       if (!login) continue; const t = this.byLogin.get(login); if (!t) continue;
       ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = lw(5.5); ctx.stroke(P.outline[t.oi]);
       ctx.strokeStyle = this.colors[t.oi].ink; ctx.lineWidth = lw(2.4); ctx.stroke(P.outline[t.oi]);
     }
     ctx.restore();
     // per-hex detail for what is on screen
-    if (z >= 6) this._detail(W, H, z);
-    if (z < 36) this._labels(W, H, z);
+    if (z >= 6) this._detail(W, H, z, only ? focusLogin : null);
+    if (z < 36) this._labels(W, H, z, only ? focusLogin : null);
   }
-  _detail(W, H, z) {
+  _detail(W, H, z, only) {
     const ctx = this.ctx; const wantTown = z >= 28; const names = z >= 32;
     const [ux0, uy0] = this.U(-60, -60), [ux1, uy1] = this.U(W + 60, H + 60);
     for (const c of this.cells.values()) {
       if (c.x < ux0 || c.x > ux1 || c.y < uy0 || c.y > uy1) continue;
       const key = (c.login + '/' + c.repo.name).toLowerCase(); const t = this.towns[key];
       const [sx, sy] = this.S(c.x, c.y);
+      if (only && c.login !== only) continue;
       if (this.lang && c.repo.lang !== this.lang) continue;
       if (t) {
         if (wantTown) {
@@ -2913,10 +2980,11 @@ class HexWorld {
     }
     c.restore();
   }
-  _labels(W, H, z) {
+  _labels(W, H, z, only) {
     const ctx = this.ctx; const taken = [];
     const order = this.terr.slice().sort((a, b) => b.cells.length - a.cells.length);
     for (const t of order) {
+      if (only && t.login !== only) continue;
       const [sx, sy] = this.S(t.ax, t.ay); if (sx < -80 || sx > W + 80 || sy < -40 || sy > H + 40) continue;
       const roomPx = t.diam * z;
       let size = Math.max(11, Math.min(22, roomPx * 0.11)); ctx.font = `700 ${size}px system-ui, sans-serif`;
@@ -3011,7 +3079,11 @@ class HexWorld {
   }
   const app = {
     onWorldLevel: (lvl) => {
-      renderCrumbs(); renderWorldPanel(lvl);
+      // picking a hub from the World tab moves to the Hub tab; leaving a hub's level from the Hub tab returns to World
+      if (lvl.kind === 'nation' && state.tab === 'world') { state.hub = lvl.login; setTab('hub'); return; }
+      if (lvl.kind === 'world' && state.tab === 'hub') { setTab('world'); return; }
+      if (lvl.kind === 'nation') { state.hub = lvl.login; $('#tab-hub').disabled = false; }
+      renderWorldPanel(lvl);
       if (lvl.kind === 'nation') { const o = state.owners[lvl.login]; Promise.all(o.repos.map((r) => ensureTown(o.login + '/' + r.name).catch(() => null))).then(() => worldView.draw()); }
     },
     onWorldHover: (h) => renderWorldHover(h),
@@ -3023,8 +3095,16 @@ class HexWorld {
   function setTab(tab) {
     state.tab = tab;
     document.body.dataset.tab = tab;
-    $('#tab-town').setAttribute('aria-selected', tab === 'town'); $('#tab-world').setAttribute('aria-selected', tab === 'world');
-    if (tab === 'world') { worldView.setData(state.owners, state.towns); fillLangs(); renderCrumbs(); renderWorldPanel(worldView.level); }
+    for (const k of ['town', 'hub', 'world']) $('#tab-' + k).setAttribute('aria-selected', tab === k);
+    $('#tab-hub').disabled = !(state.hub && state.owners[state.hub]);
+    if (tab === 'world' || tab === 'hub') {
+      worldView.hubOnly = tab === 'hub'; worldView.outline = tab === 'world' ? state.hub || null : null;
+      worldView.resize(); worldView.setData(state.owners, state.towns); fillLangs();
+      const L = worldView.level;
+      if (tab === 'hub') { if (!(L.kind === 'nation' && L.login === state.hub)) worldView.go({ kind: 'nation', login: state.hub }); }
+      else if (L.kind !== 'world') worldView.go({ kind: 'world' });
+      renderWorldPanel(worldView.level); worldView.draw();
+    }
     else if (state.current) renderSummary(state.current);
     applyView();
   }
@@ -3038,6 +3118,7 @@ class HexWorld {
     // towns from the old rectangle layout ask the map bot to rebuild them
     if (t.mode === 'code' && !(t.v >= 2) && !t._rebuildAsked) { t._rebuildAsked = true; sendToMap(t.key, null); }
     if (state.current !== t) { state.tour = null; for (const v of allViews()) { v.showRoute = false; v.routeStep = null; } findBox.value = ''; state.find = { hits: [], idx: -1 }; renderFind(); }
+    const hubKey = Object.keys(state.owners).find((l) => l.toLowerCase() === String(t.key).split('/')[0].toLowerCase()); if (hubKey) state.hub = hubKey;
     state.current = t; for (const v of allViews()) v.setTown(t); setTab('town'); renderSummary(t);
     $('#q').value = t.key; history.replaceState(null, '', '#' + t.key);
   }
@@ -3086,7 +3167,7 @@ class HexWorld {
         const o = await scanOwner(p.owner, (m) => progress(m));
         state.owners[o.login] = o; p.owner = o.login;
       }
-      if (!p.repo) { sendToMap(p.owner); save(); renderShelf(); progress(`Charted ${p.owner}: ${state.owners[p.owner].repos.length} plots.`, 'ok'); setTab('world'); worldView.go({ kind: 'nation', login: p.owner }); return; }
+      if (!p.repo) { sendToMap(p.owner); save(); renderShelf(); progress(`Charted ${p.owner}: ${state.owners[p.owner].repos.length} plots.`, 'ok'); state.hub = p.owner; setTab('hub'); return; }
       const scan = await scanRepo(p.owner, p.repo, (m) => progress(m));
       progress('Laying out streets…');
       await new Promise((r) => setTimeout(r, 0));
@@ -3205,11 +3286,6 @@ class HexWorld {
     state.tour = null; for (const v of allViews()) { v.showRoute = false; v.routeStep = null; v.pinned = null; v.hover = null; }
     $('#inspector').innerHTML = ''; tv().draw(); tv().fit(); if (state.current) renderSummary(state.current);
   }
-  function renderCrumbs() {
-    const L = worldView.level, el = $('#crumbs'); const parts = [`<button data-go="world">World</button>`];
-    if (L.kind === 'nation') parts.push(`<span>${esc(L.login)}</span>`);
-    el.innerHTML = parts.join('<i>›</i>');
-  }
   function renderWorldPanel(L) {
     const owners = Object.values(state.owners); const links = worldView.links || [];
     let h;
@@ -3239,7 +3315,7 @@ class HexWorld {
 
   /* ---------- wiring ---------- */
   $('#form').addEventListener('submit', (e) => { e.preventDefault(); run($('#q').value); });
-  $('#tab-town').onclick = () => setTab('town'); $('#tab-world').onclick = () => setTab('world');
+  $('#tab-town').onclick = () => setTab('town'); $('#tab-hub').onclick = () => { if (state.hub) setTab('hub'); }; $('#tab-world').onclick = () => setTab('world');
   $('#mode-plan').onclick = () => setMode('plan'); $('#mode-3d').onclick = () => setMode('3d');
   $('#zin').onclick = () => (state.tab === 'town' ? tv() : worldView).zoomBy(1.4);
   $('#zout').onclick = () => (state.tab === 'town' ? tv() : worldView).zoomBy(1 / 1.4);
