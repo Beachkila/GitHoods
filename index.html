@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>GitHoods</title>
-<meta name="description" content="Turns a GitHub repository into a town map. Folders become districts, files become buildings, imports become streets.">
+<meta name="description" content="Turns a GitHub repository into a hood map. Folders become districts, files become buildings, imports become streets.">
 <style>
 :root{--bg:#F3EAD7;--panel:#FBF6EC;--ink:#3B2A1A;--soft:#7A6650;--line:#D9C9AB;--accent:#C8643B;--accent2:#5E9E8A;--input:#FFFDF8;--err:#A63D2A;color-scheme:light}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#1F1A15;--panel:#29221B;--ink:#EFE4D0;--soft:#B5A58C;--line:#43382C;--input:#211B15;--err:#F08A72;color-scheme:dark}}
@@ -121,7 +121,21 @@ body[data-view="3d"] #town-canvas{display:none} body[data-tab="world"] #town-3d{
 .find-bar button:disabled{opacity:.45;cursor:default}
 #find-results li.on button{font-weight:700}
 #find-results .more{font-size:12px;color:var(--soft);border:0}
+.mapbar{position:absolute;left:12px;top:12px;right:64px;display:none;gap:6px;z-index:2;pointer-events:none}
+body[data-tab="world"] .mapbar{display:flex}
+.mapbar>*{pointer-events:auto}
+.mapfind{position:relative;flex:0 1 280px;min-width:0}
+.mapbar input,.mapbar select{padding:7px 10px;border:1px solid #CDBB98;border-radius:8px;background:#FBF6EC;color:#3B2A1A;font:inherit;max-width:100%}
+.mapbar input{width:100%}
+.mapres{position:absolute;left:0;right:0;top:100%;margin:4px 0 0;padding:4px;list-style:none;background:#FBF6EC;border:1px solid #CDBB98;border-radius:8px;box-shadow:0 6px 18px #3B2A1A26;max-height:50vh;overflow:auto}
+.mapres[hidden]{display:none}
+.mapres button{display:flex;justify-content:space-between;gap:10px;width:100%;border:0;background:none;color:#3B2A1A;padding:6px 8px;border-radius:6px;text-align:left}
+.mapres button:hover,.mapres button:focus{background:#EFE4CC}
+.mapres small{color:#7A6650;white-space:nowrap}
+.mapres span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:7px;border:1px solid #0003;vertical-align:-1px}
 @media (max-width:820px){
+  .mapbar{right:12px} .mapfind{flex:1 1 auto} .mapbar select{max-width:42%}
   main{grid-template-columns:minmax(0,1fr);grid-template-rows:62vh auto}
   aside{border-left:0;border-top:1px solid var(--line);overflow:visible}
   body{height:auto;min-height:100%} html{height:auto}
@@ -134,7 +148,7 @@ body[data-view="3d"] #town-canvas{display:none} body[data-tab="world"] #town-3d{
   <form id="form" autocomplete="off"><input id="q" placeholder="owner/repo, a GitHub link, or an owner" aria-label="Repository or owner" spellcheck="false" autocapitalize="off"><button class="btn" id="scan" type="submit">Scan</button><button class="ghost" id="gear" type="button" title="Settings" aria-label="Settings">⚙</button></form>
 </header>
 <div class="bar">
-  <div class="seg" role="tablist"><button id="tab-town" role="tab" aria-selected="true">Town</button><button id="tab-world" role="tab" aria-selected="false">World</button></div>
+  <div class="seg" role="tablist"><button id="tab-town" role="tab" aria-selected="true">Hood</button><button id="tab-world" role="tab" aria-selected="false">World</button></div>
   <div class="seg" id="modes"><button id="mode-3d" aria-pressed="true">3D</button><button id="mode-plan" aria-pressed="false">Street map</button></div>
   <nav id="crumbs"></nav>
   <div id="progress"></div>
@@ -142,12 +156,13 @@ body[data-view="3d"] #town-canvas{display:none} body[data-tab="world"] #town-3d{
 <main>
   <div class="stage">
     <canvas id="town-canvas"></canvas>
-    <div id="town-3d" class="view3d" hidden aria-label="3D town. Drag to turn, pinch or scroll to zoom, two fingers or right-drag to move, tap a building."></div>
-    <div id="redraw" class="redraw" hidden><span>This town was drawn with an older layout, so it only has the street map.</span><button class="btn small" id="redraw-btn" type="button">Redraw with the new layout</button></div>
+    <div id="town-3d" class="view3d" hidden aria-label="3D hood. Drag to turn, pinch or scroll to zoom, two fingers or right-drag to move, tap a building."></div>
+    <div id="redraw" class="redraw" hidden><span>This hood was drawn with an older layout, so it only has the street map.</span><button class="btn small" id="redraw-btn" type="button">Redraw with the new layout</button></div>
     <canvas id="world-canvas"></canvas>
+    <div class="mapbar"><div class="mapfind"><input id="mapfind" type="search" placeholder="Find a hub or repo" aria-label="Find a hub or repo on the map" autocomplete="off" spellcheck="false"><ul id="mapres" class="mapres" hidden></ul></div><select id="maplang" aria-label="Highlight a language"></select></div>
     <div class="zoom"><button id="key" aria-label="Map key" title="What the shapes mean">?</button><button id="rotl" class="only3d" aria-label="Turn left a quarter" title="Turn left">⟲</button><button id="rotr" class="only3d" aria-label="Turn right a quarter" title="Turn right">⟳</button><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zfit" aria-label="Fit" title="Fit">⤢</button></div>
   </div>
-  <aside><div class="find-wrap"><input id="find" type="search" placeholder="Find a file or function in this town" aria-label="Find a file" autocomplete="off" spellcheck="false"><div id="find-bar" class="find-bar" hidden><span id="find-count"></span><button id="find-prev" type="button" aria-label="Previous match">‹</button><button id="find-next" type="button" aria-label="Next match">›</button><button id="find-clear" type="button">Clear</button></div><ul id="find-results" class="list"></ul></div><div id="inspector"></div><div id="summary"></div></aside>
+  <aside><div class="find-wrap"><input id="find" type="search" placeholder="Find a file or function in this hood" aria-label="Find a file" autocomplete="off" spellcheck="false"><div id="find-bar" class="find-bar" hidden><span id="find-count"></span><button id="find-prev" type="button" aria-label="Previous match">‹</button><button id="find-next" type="button" aria-label="Next match">›</button><button id="find-clear" type="button">Clear</button></div><ul id="find-results" class="list"></ul></div><div id="inspector"></div><div id="summary"></div></aside>
 </main>
 <div class="shelf-wrap"><b>On the map · <span id="shelf-count"></span></b></div>
 <dialog id="legend" aria-label="Map key"><form method="dialog"><div class="legend-head"><h3>Map key</h3><button class="ghost" value="close" aria-label="Close">✕</button></div><div id="legend-body"></div></form></dialog>
@@ -155,7 +170,7 @@ body[data-view="3d"] #town-canvas{display:none} body[data-tab="world"] #town-3d{
   <h3 style="margin-top:0">Settings</h3>
   <p class="muted">Without a token GitHub allows 60 requests an hour from your address. A small repo costs about 8 requests plus raw file reads, which are not counted. A fine-grained token with public read-only access raises the limit to 5,000. It is stored only in this browser.</p>
   <input id="token" type="password" placeholder="GitHub token (optional)" autocomplete="off">
-  <menu><button class="ghost" id="clear-cache" value="clear">Clear saved towns</button><button class="ghost" value="cancel">Close</button><button class="btn" id="save-token" value="save">Save token</button></menu>
+  <menu><button class="ghost" id="clear-cache" value="clear">Clear saved hoods</button><button class="ghost" value="cancel">Close</button><button class="btn" id="save-token" value="save">Save token</button></menu>
 </form></dialog>
 <script>window.GH_SITE_REPO = "Beachkila/GitHoods"; window.GH_WORKER_URL = "https://githoods-relay.kbmallonee.workers.dev";</script>
 <script src="vendor/three-r128.min.js"></script>
@@ -523,14 +538,14 @@ const STD_NODE = new Set('assert async_hooks buffer child_process cluster consol
 /* Known code sets -> unique buildings. Order matters: first match wins for a building's style. */
 const LANDMARKS = [
   { key: 'observatory', label: 'Planetarium', libs: ['three', 'three.js', 'babylonjs', '@babylonjs/core', 'aframe', 'pixi.js', 'p5', 'ogl', 'regl'] },
-  { key: 'theater', label: 'Arts centre', libs: ['react', 'react-dom', 'preact', 'solid-js', 'vue', 'svelte', '@angular/core', 'lit', 'htmx.org', 'alpinejs', '@solidjs/web'] },
+  { key: 'theater', label: 'Arts center', libs: ['react', 'react-dom', 'preact', 'solid-js', 'vue', 'svelte', '@angular/core', 'lit', 'htmx.org', 'alpinejs', '@solidjs/web'] },
   { key: 'exchange', label: 'Exchange tower', libs: ['express', 'fastify', 'koa', 'hono', 'flask', 'django', 'fastapi', 'http.server', 'aiohttp', 'tornado', 'net/http', 'github.com/gin-gonic/gin', 'actix-web', 'axum', 'rocket', 'sinatra', 'rails', 'starlette', 'socketserver'] },
   { key: 'depot', label: 'Assembly plant', libs: ['pyinstaller', 'PyInstaller', 'electron-builder', 'webpack', 'vite', 'esbuild', 'rollup', 'tsdown', 'parcel'] },
   { key: 'windowgate', label: 'Window gallery', libs: ['webview', 'pywebview', 'electron', '@tauri-apps/api', 'tauri'] },
   { key: 'lab', label: 'Research lab', libs: ['torch', 'tensorflow', 'keras', 'sklearn', 'scikit-learn', 'jax', 'transformers', '@tensorflow/tfjs', 'onnxruntime', 'ultralytics', 'cv2', 'opencv-python'] },
   { key: 'oracle', label: 'Signal spire', libs: ['openai', '@anthropic-ai/sdk', 'anthropic', '@google/genai', 'ollama', 'langchain', 'llama_cpp'] },
   { key: 'mill', label: 'Wind turbines', libs: ['numpy', 'pandas', 'scipy', 'polars', 'd3', 'matplotlib', 'plotly', 'magick', 'PIL', 'pillow', 'sharp'] },
-  { key: 'vault', label: 'Data centre', libs: ['sqlite3', 'kysely', 'sqlalchemy', 'pg', 'mongoose', 'prisma', '@prisma/client', 'redis', 'ioredis', 'mysql2', 'better-sqlite3', 'peewee', 'diesel', 'gorm.io/gorm', '@supabase/supabase-js', 'firebase', 'firebase-admin', '@libsql/client', 'drizzle-orm'] },
+  { key: 'vault', label: 'Data center', libs: ['sqlite3', 'kysely', 'sqlalchemy', 'pg', 'mongoose', 'prisma', '@prisma/client', 'redis', 'ioredis', 'mysql2', 'better-sqlite3', 'peewee', 'diesel', 'gorm.io/gorm', '@supabase/supabase-js', 'firebase', 'firebase-admin', '@libsql/client', 'drizzle-orm'] },
   { key: 'mast', label: 'Radio mast', libs: ['RPi', 'RPi.GPIO', 'gpiozero', 'pigpio', 'onoff', 'smbus', 'smbus2', 'spidev', 'serial', 'pyserial', 'board', 'machine'] },
   { key: 'automaton', label: 'Automation plant', libs: ['playwright', 'playwright-core', 'puppeteer', 'selenium', '@playwright/test'] },
   { key: 'studio', label: 'Sound stage', libs: ['tkinter', 'PyQt5', 'PyQt6', 'PySide6', 'wx', 'gi', 'kivy', 'pygame', 'raylib'] },
@@ -808,7 +823,7 @@ function buildTown(scan) {
   // ---- districts
   const isHidden = (seg) => seg.startsWith('.');
   const groups = new Map(); // key -> {key, prefix, entries}
-  const civic = { key: '::civic', prefix: '', label: 'Civic quarter', entries: [], civic: true };
+  const civic = { key: '::civic', prefix: '', label: 'Civic center', entries: [], civic: true };
   for (const e of entries) {
     const segs = e.p.split('/');
     if (segs.length === 1 || isHidden(segs[0])) { civic.entries.push(e); continue; }
@@ -1309,7 +1324,7 @@ function classify({ districts, buildings, scan, edges, streets }) {
   else if (!nonCivic.length) core = 'Hamlet';
   else if (huts >= 20 && nonCivic.length >= 8) core = 'Colonial metropolis';
   else if (nonCivic.length >= 8) core = 'Metropolis';
-  else if (nonCivic.length >= 3) core = nonCivic.length === 3 ? 'Three-district town' : 'Town';
+  else if (nonCivic.length >= 3) core = nonCivic.length === 3 ? 'Three-district hood' : 'Hood';
   else core = 'Village';
   const traits = [];
   const sq = buildings.find((b) => b.special === 'square'); if (sq) traits.push('downtown square');
@@ -1418,7 +1433,7 @@ const PAL = {
 };
 function shade(hex, k) { const h = hex.replace('#', ''); const r = [0, 2, 4].map((i) => Math.max(0, Math.min(255, Math.round(parseInt(h.slice(i, i + 2), 16) * k)))); return '#' + r.map((v) => v.toString(16).padStart(2, '0')).join(''); }
 function langColor(l) { return LANG_COLORS[l] || LANG_COLORS.other; }
-const KIND_LABEL = { library: 'Library (README)', plaque: 'Monolith sign (license)', fence: 'Security fence (ignore file)', port: 'Container terminal (deploy config)', customs: 'Checkpoint (dependency manifest)', warehouse: 'Distribution centre (lockfile or data)', works: 'Robotic factory (CI workflows)', yard: 'Proving ground (tests)', gallery: 'Museum (images)', concert: 'Amphitheatre (audio)', cinema: 'Multiplex (video)', stake: 'Empty lot (empty file)', depot: 'Fulfilment plant (build script or spec)', reading: 'Reading pavilion (docs)', hall: 'Civic centre (entry point)', house: 'Building', block: 'Apartment block (folder)', hut: 'Modular unit (package)', hutcluster: 'Modular village (many small folders)', trash: 'Recycling bins (build litter)', vault: 'Data centre (database schema or migration)', service: 'Edge node (deployed function)', shed: 'Utility cabinet (tool config)', 'link-article': 'Article', 'link-repo': 'Code repo', 'link-video': 'Video' };
+const KIND_LABEL = { library: 'Library (README)', plaque: 'Monolith sign (license)', fence: 'Security fence (ignore file)', port: 'Container terminal (deploy config)', customs: 'Checkpoint (dependency manifest)', warehouse: 'Distribution center (lockfile or data)', works: 'Robotic factory (CI workflows)', yard: 'Proving ground (tests)', gallery: 'Museum (images)', concert: 'Amphitheater (audio)', cinema: 'Multiplex (video)', stake: 'Empty lot (empty file)', depot: 'Fulfilment plant (build script or spec)', reading: 'Reading pavilion (docs)', hall: 'Civic center (entry point)', house: 'Building', block: 'Apartment block (folder)', hut: 'Modular unit (package)', hutcluster: 'Modular village (many small folders)', trash: 'Recycling bins (build litter)', vault: 'Data center (database schema or migration)', service: 'Edge node (deployed function)', shed: 'Utility cabinet (tool config)', 'link-article': 'Article', 'link-repo': 'Code repo', 'link-video': 'Video' };
 const SPECIAL_LABEL = { square: 'Plaza (most imported file)', power: 'Substation (shared config)', water: 'Water tower (shared utilities)', dyeworks: 'Design studio (shared theme)', gate: 'Transit station (re-exports a district)' };
 
 function makeFogPattern(ctx) {
@@ -1547,7 +1562,7 @@ class TownView {
     ctx.fillStyle = PAL.fog; ctx.fillRect(0, 0, W, H);
     ctx.save(); const [ox, oy] = this.S(0, 0); ctx.translate(ox % 8, oy % 8); ctx.fillStyle = this.fog; ctx.fillRect(-8, -8, W + 16, H + 16); ctx.restore();
     if (t.mode === 'list') return this.mode === 'plan' ? this._drawListPlan(t) : this._drawListIso(t);
-    if (!(t.v >= 2)) { this._text('This town uses the old layout.', W / 2, H / 2 - 10, { size: 13 }); this._text('It is being rebuilt; check back in a few minutes.', W / 2, H / 2 + 10, { size: 13 }); return; }
+    if (!(t.v >= 2)) { this._text('This hood uses the old layout.', W / 2, H / 2 - 10, { size: 13 }); this._text('It is being rebuilt; check back in a few minutes.', W / 2, H / 2 + 10, { size: 13 }); return; }
     return t.v >= 3 ? this._drawGrid(t) : this._drawGrown(t);
   }
   _poly(pts, fill, stroke, lw) { const c = this.ctx; c.beginPath(); pts.forEach(([x, y], i) => (i ? c.lineTo(x, y) : c.moveTo(x, y))); c.closePath(); if (fill) { c.fillStyle = fill; c.fill(); } if (stroke) { c.strokeStyle = stroke; c.lineWidth = lw || 0.6; c.stroke(); } }
@@ -2449,7 +2464,7 @@ function buildLegend(town, use3d) {
   for (const k of KINDS) add('kind:' + k, () => pic({ kind: k, lang: k === 'house' || k === 'block' ? 'typescript' : null }), KIND_LABEL[k] + (k === 'house' ? '. Footprint grows with lines of code; wide and low means many short functions, a tall glass tower means a few long ones.' : ''));
   for (const [k, label] of Object.entries(SPECIAL_LABEL)) add('special:' + k, () => pic({ kind: 'house', special: k, lang: null }), label);
   const usedHere = new Map(); if (town && town.mode === 'code') { for (const b of town.buildings) if (b.landmark) usedHere.set(b.landmark.key, b.landmark.lib); for (const c of town.clearings) if (c.kind && !usedHere.has(c.kind)) usedHere.set(c.kind, c.name); }
-  for (const lm of LANDMARKS) add('landmark:' + lm.key, () => pic({ kind: 'house', landmark: { key: lm.key }, lang: null }), usedHere.has(lm.key) ? `${lm.label}: the file that uses ${usedHere.get(lm.key)} the most. The library itself is a terminal outside town with this building on it.` : `${lm.label}: the file that leans hardest on ${lm.libs.slice(0, 3).join(', ')}…`);
+  for (const lm of LANDMARKS) add('landmark:' + lm.key, () => pic({ kind: 'house', landmark: { key: lm.key }, lang: null }), usedHere.has(lm.key) ? `${lm.label}: the file that uses ${usedHere.get(lm.key)} the most. The library itself is a terminal outside the hood with this building on it.` : `${lm.label}: the file that leans hardest on ${lm.libs.slice(0, 3).join(', ')}…`);
   add('f:road', feature.road, 'Road: only where two districts import from each other. Wider means more imports.');
   add('f:trail', feature.trail, 'Trail: links a district that shares no imports, so every district is reachable.');
   add('f:block', feature.block, 'District: one folder, laid out as a block. Its ground colour shows what it does.');
@@ -2479,7 +2494,7 @@ function buildLegend(town, use3d) {
   const wrap = document.createElement('div'); wrap.className = 'legend';
   const section = (title, list, parent) => { if (!list.length) return; const h = document.createElement('h4'); h.textContent = title; parent.appendChild(h); const ul = document.createElement('ul'); for (const it of list) { const li = document.createElement('li'); li.appendChild(it.icon()); const s = document.createElement('span'); s.textContent = it.text; li.appendChild(s); ul.appendChild(li); } parent.appendChild(ul); };
   const inTown = items.filter((i) => here.has(i.id)), rest = items.filter((i) => !here.has(i.id));
-  if (inTown.length) section('In this town', inTown, wrap);
+  if (inTown.length) section('In this hood', inTown, wrap);
   const det = document.createElement('details'); if (!inTown.length) det.open = true;
   const sum = document.createElement('summary'); sum.textContent = inTown.length ? `Everything else on GitHoods (${rest.length})` : 'Everything on GitHoods'; det.appendChild(sum);
   // pictures are drawn when the section opens, so the key opens quickly
@@ -2489,8 +2504,14 @@ function buildLegend(town, use3d) {
   return wrap;
 }
 
-/* ---- world.js ---- */
-/* GitHoods world: owners are nations, connected owners share an island, repos are plots granted in creation order. */
+/* ---- hexworld.js ---- */
+/* GitHoods world: one continent made of hexagons.
+   Every repo is one hex. Seven hexes make a "flower" (a center hex and its six neighbors); flowers tile the plane
+   in a coarser hex lattice, so the map has two scales that line up exactly. An owner holds ceil(repos / 7) flowers.
+   Owners are placed oldest first. Each new owner takes the spot on the coast where the whole landmass stays the
+   most even (short coastline, little spread), then grows outward from there with a ragged edge. Nothing about an
+   owner (language, size of repos, links) decides where it lands. Early owners end up landlocked as the land fills in.
+   The view zooms through three steps: territories, individual repo hexes, then the town inside a hex. */
 
 /* ---------- model ---------- */
 function worldLinks(owners, towns) {
@@ -2515,291 +2536,389 @@ function worldLinks(owners, towns) {
   return [...links.values()].map((l) => ({ a: l.a, b: l.b, why: [...l.why] }));
 }
 
-/* Islands: the coastline is built from the repos. Walking clockwise from the top, each repo owns a stretch of
-   coast in creation order; a bigger repo pushes out a peninsula, an empty one leaves a bay. More languages make a
-   rougher coast. Stars raise hills. Forks sit offshore on islets joined by sandbars. Owners linked by forks or
-   imports share one island, each holding its own stretch, with borders running inland between them. */
-const COAST_N = 240;
-function worldIslands(owners, links, towns) {
-  const ids = Object.keys(owners).sort((a, b) => (owners[a].id || 9e15) - (owners[b].id || 9e15) || a.localeCompare(b));
-  const parent = new Map(ids.map((i) => [i, i]));
-  const find = (x) => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x))); x = parent.get(x); } return x; };
-  for (const l of links) parent.set(find(l.a), find(l.b));
-  const groups = new Map();
-  for (const i of ids) { const r = find(i); if (!groups.has(r)) groups.set(r, []); groups.get(r).push(i); }
-  const islands = [...groups.values()].map((members) => shapeIsland(members, owners, towns));
-  // shelf rows ordered by the oldest member account (no spiral)
-  const rowW = Math.max(40, Math.sqrt(islands.reduce((a, i) => a + (2 * i.R + 5) ** 2, 0)) * 1.3);
-  let x = 0, y = 0, rowH = 0;
-  for (const isl of islands) {
-    const gap = 3 + isl.R * 0.25;
-    if (x + 2 * isl.R > rowW && x > 0) { x = 0; y += rowH + 4; rowH = 0; }
-    isl.cx = x + isl.R; isl.cy = y + isl.R; x += 2 * isl.R + gap; rowH = Math.max(rowH, 2 * isl.R);
-  }
-  return islands;
-}
+const HX_SQ3 = Math.sqrt(3);
+const HX_DIRS = [[1, 0], [0, 1], [-1, 1], [-1, 0], [0, -1], [1, -1]]; // E, SE, SW, W, NW, NE (pointy-top, y down)
+const hxPx = (q, r) => [HX_SQ3 * (q + r / 2), 1.5 * r];
+const hxCorner = (k) => { const a = (Math.PI / 180) * (60 * k - 30); return [Math.cos(a), Math.sin(a)]; };
+const HX_CORNERS = [0, 1, 2, 3, 4, 5].map(hxCorner);
+const hxSuperToFine = (a, b) => [2 * a - b, a + 3 * b]; // a flower center in fine axial coordinates
+const hxDist = (da, db) => (Math.abs(da) + Math.abs(db) + Math.abs(da + db)) / 2;
+const hxNoise = (s) => (hashStr(s) % 997) / 997;
 
-function shapeIsland(members, owners, towns) {
-  const id = members.slice().sort().join('+');
-  const rnd = rng(hashStr(id));
-  const repos = []; const forks = [];
-  for (const m of members) for (const r of owners[m].repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0) || a.name.localeCompare(b.name))) (r.fork ? forks : repos).push({ owner: m, r });
-  if (!repos.length && forks.length) repos.push(forks.shift());
-  const n = Math.max(1, repos.length);
-  const R0 = 3 + 1.25 * Math.sqrt(n);
-  const maxLog = Math.max(1, ...repos.map((x) => Math.log10(1 + (x.r.size || 0))));
-  const langs = new Set(repos.map((x) => x.r.lang).filter(Boolean)).size;
-  repos.forEach((x, i) => {
-    x.th = -Math.PI / 2 + ((i + 0.5) / n) * Math.PI * 2;
-    const sz = Math.log10(1 + (x.r.size || 0)) / maxLog;
-    x.rad = x.r.size ? R0 * (0.62 + 0.75 * sz) : R0 * 0.42;
-    x.town = towns[(x.owner + '/' + x.r.name).toLowerCase()] || null;
-  });
-  // coastline profile: smooth blend of each repo's reach, sampled once
-  const buckets = n > 60 ? Array.from({ length: 60 }, (_, k) => { const part = repos.filter((x, i) => Math.floor((i / n) * 60) === k); return { th: -Math.PI / 2 + ((k + 0.5) / 60) * Math.PI * 2, rad: part.length ? Math.max(...part.map((p) => p.rad)) : R0 * 0.6 }; }) : repos;
-  const kappa = Math.min(150, Math.max(3, buckets.length * 2.4));
-  const ph = [rnd() * 6.28, rnd() * 6.28, rnd() * 6.28];
-  const coast = new Float32Array(COAST_N);
-  for (let k = 0; k < COAST_N; k++) {
-    const th = -Math.PI / 2 + (k / COAST_N) * Math.PI * 2;
-    let num = 0, den = 0; for (const b of buckets) { const w = Math.exp(kappa * (Math.cos(th - b.th) - 1)); num += w * b.rad; den += w; }
-    const rough = 0.012 * Math.min(langs, 12) * (Math.sin(7 * th + ph[0]) + 0.7 * Math.sin(11 * th + ph[1]) + 0.5 * Math.sin(17 * th + ph[2]));
-    coast[k] = (den ? num / den : R0) * (1 + rough);
-  }
-  const coastAt = (th) => { let u = ((th + Math.PI / 2) / (Math.PI * 2)) % 1; if (u < 0) u += 1; const f = u * COAST_N; const i = Math.floor(f) % COAST_N, j = (i + 1) % COAST_N; const t = f - Math.floor(f); return coast[i] * (1 - t) + coast[j] * t; };
-  // plots on their own stretch; crowded coasts stack plots in rows inland
-  const rows = n <= 40 ? 1 : Math.ceil(n / 40);
-  repos.forEach((x, i) => {
-    const row = rows > 1 ? i % rows : 0;
-    const c = coastAt(x.th);
-    const dist = c * (x.r.size ? 0.72 : 0.78) - row * Math.min(c * 0.12, 1.3);
-    const chord = (2 * Math.PI * Math.max(1, dist)) / Math.ceil(n / rows);
-    const want = x.r.size ? 0.55 + 0.35 * (Math.log10(1 + x.r.size) / maxLog) : 0.4;
-    x.half = Math.max(0.12, Math.min(want, chord * 0.38));
-    x.px = Math.cos(x.th) * dist; x.py = Math.sin(x.th) * dist;
-  });
-  // forks offshore, spread evenly around the coast
-  const fShow = forks.slice(0, 36);
-  fShow.forEach((x, j) => {
-    x.th = -Math.PI / 2 + ((j + 0.5) / fShow.length) * Math.PI * 2 + 0.12;
-    const d = coastAt(x.th) * 1.45; x.px = Math.cos(x.th) * d; x.py = Math.sin(x.th) * d; x.half = 0.45;
-    x.town = towns[(x.owner + '/' + x.r.name).toLowerCase()] || null;
-  });
-  // hills behind the most-starred repos
-  const hills = repos.filter((x) => x.r.stars > 0).sort((a, b) => b.r.stars - a.r.stars).slice(0, 12).map((x) => {
-    const c = coastAt(x.th) * 0.72 - 1.25 - x.half; return { x: Math.cos(x.th) * c, y: Math.sin(x.th) * c, levels: Math.min(5, Math.ceil(Math.log2(1 + x.r.stars))) };
-  });
-  // nations: each member holds the arc of its repos; borders run inland between arcs
-  const nations = members.map((m) => {
-    const mine = repos.filter((x) => x.owner === m);
-    const a0 = mine.length ? mine[0].th - Math.PI / n : 0, a1 = mine.length ? mine[mine.length - 1].th + Math.PI / n : 0;
-    return { login: m, a0, a1, mid: (a0 + a1) / 2, count: owners[m].repos.length, type: owners[m].type };
-  });
-  const borders = members.length > 1 ? nations.map((nt) => { const pts = []; for (let k = 0; k <= 10; k++) { const t = k / 10; const r = coastAt(nt.a0) * t; const wob = (rnd() - 0.5) * 0.12 * t; pts.push([Math.cos(nt.a0 + wob) * r, Math.sin(nt.a0 + wob) * r]); } return pts; }) : [];
-  const maxCoast = Math.max(...coast);
-  const R = Math.max(maxCoast * 1.32, fShow.length ? maxCoast * 1.45 + 1.3 : 0) + 1.2;
-  const name = members.length === 1 ? members[0] + ' Isle' : members.slice().sort((a, b) => owners[b].repos.length - owners[a].repos.length)[0] + ' Archipelago';
-  return { id, members, name, repos, forks: fShow, forkMore: forks.length - fShow.length, coast, coastAt, hills, nations, borders, R, R0, langs };
-}
+// Muted, distinct fills. No deep blues; neighbours never share one.
+const HX_PALETTE = ['#C9B27A', '#A8BB9B', '#C99C86', '#CBA5AD', '#B6B98C', '#B4A9C4', '#9FBDB4', '#D9BC8C', '#BE8F9B', '#A6A877', '#BDB6A8', '#C4A98F'];
 
-function plotGrid(owner) {
-  const repos = owner.repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0) || a.name.localeCompare(b.name));
-  const n = Math.max(1, repos.length), cols = Math.ceil(Math.sqrt(n * 1.3));
-  return { cols, rows: Math.ceil(n / cols), plots: repos.map((r, i) => ({ repo: r, c: i % cols, r: Math.floor(i / cols), n: i + 1 })) };
+function hexLayout(owners, towns) {
+  const firstSeen = {};
+  for (const t of Object.values(towns || {})) { const f = t.firstBuilt || t.builtAt; const o = String(t.owner || '').toLowerCase(); if (f && (!firstSeen[o] || f < firstSeen[o])) firstSeen[o] = f; }
+  const when = (l) => firstSeen[l.toLowerCase()] || owners[l].scannedAt || 9e15;
+  const logins = Object.keys(owners).filter((l) => owners[l].repos && owners[l].repos.length).sort((a, b) => when(a) - when(b) || a.localeCompare(b));
+  const K = (a, b) => a + ',' + b;
+  const sp = (a, b) => [HX_SQ3 * (a + b / 2), 1.5 * b]; // flower position in flower-lattice units, for measuring spread
+  const land = new Map(); // 'a,b' -> owner index
+  let cnt = 0, sX = 0, sY = 0, sQ = 0, perim = 0;
+  const flowersOf = [];
+
+  const grow = (seed, k, login) => {
+    const inR = new Set(); const region = []; let dp = 0;
+    const touch = (a, b) => { let m = 0; for (const [da, db] of HX_DIRS) { const kk = K(a + da, b + db); if (land.has(kk) || inR.has(kk)) m++; } return m; };
+    dp += 6 - 2 * touch(seed[0], seed[1]); inR.add(K(seed[0], seed[1])); region.push(seed);
+    while (region.length < k) {
+      let best = null, bs = 1e9; const seen = new Set();
+      for (const [a, b] of region) for (const [da, db] of HX_DIRS) {
+        const x = a + da, y = b + db, kk = K(x, y);
+        if (land.has(kk) || inR.has(kk) || seen.has(kk)) continue; seen.add(kk);
+        let hug = 0; for (const [ea, eb] of HX_DIRS) if (land.has(K(x + ea, y + eb))) hug++;
+        const s = hxDist(x - seed[0], y - seed[1]) + 1.5 * hxNoise(login + ':' + kk) - 0.3 * hug;
+        if (s < bs) { bs = s; best = [x, y]; }
+      }
+      dp += 6 - 2 * touch(best[0], best[1]); inR.add(K(best[0], best[1])); region.push(best);
+    }
+    return { region, dp };
+  };
+
+  // No owner may end up enclosed by another. For the owners a placement touches (the newcomer and its neighbours),
+  // look at everything around their borders: a border with no open water and a single neighbour is refused outright,
+  // and a single neighbour holding most of a border costs more the more it holds. Closed-off lakes cost a little too.
+  const embrace = (region, oi) => {
+    const inR = new Set(region.map(([a, b]) => K(a, b)));
+    const ownerAt = (a, b) => { const kk = K(a, b); if (inR.has(kk)) return oi; const o = land.get(kk); return o === undefined ? -1 : o; };
+    let a0 = 1e9, a1 = -1e9, b0 = 1e9, b1 = -1e9;
+    const grab = (a, b) => { a0 = Math.min(a0, a); a1 = Math.max(a1, a); b0 = Math.min(b0, b); b1 = Math.max(b1, b); };
+    for (const kk of land.keys()) { const [a, b] = kk.split(',').map(Number); grab(a, b); }
+    for (const [a, b] of region) grab(a, b);
+    a0--; a1++; b0--; b1++;
+    const out = new Set([K(a0, b0)]); const st = [[a0, b0]];
+    while (st.length) { const [a, b] = st.pop(); for (const [da, db] of HX_DIRS) { const x = a + da, y = b + db; if (x < a0 || x > a1 || y < b0 || y > b1) continue; const kk = K(x, y); if (out.has(kk) || ownerAt(x, y) >= 0) continue; out.add(kk); st.push([x, y]); } }
+    let lakes = 0; for (let a = a0; a <= a1; a++) for (let b = b0; b <= b1; b++) if (ownerAt(a, b) < 0 && !out.has(K(a, b))) lakes++;
+    const touched = new Set([oi]); for (const [a, b] of region) for (const [da, db] of HX_DIRS) { const o = land.get(K(a + da, b + db)); if (o !== undefined) touched.add(o); }
+    let pen = lakes * 8;
+    for (const o of touched) {
+      const mine = o === oi ? region : flowersOf[o]; const by = new Map(); let water = 0, other = 0;
+      for (const [a, b] of mine) for (const [da, db] of HX_DIRS) {
+        const w = ownerAt(a + da, b + db); if (w === o) continue;
+        if (w < 0) water++; else { other++; by.set(w, (by.get(w) || 0) + 1); }
+      }
+      if (!other) continue;
+      if (!water && by.size === 1) pen += 2000;
+      const share = Math.max(...by.values()) / (water + other);
+      if (share > 0.55) pen += 60 * (share - 0.55);
+    }
+    return pen;
+  };
+
+  logins.forEach((login, oi) => {
+    const k = Math.ceil(owners[login].repos.length / 7);
+    let cands;
+    if (!land.size) cands = [[0, 0]];
+    else {
+      const set = new Map();
+      for (const kk of land.keys()) { const [a, b] = kk.split(',').map(Number); for (const [da, db] of HX_DIRS) { const x = a + da, y = b + db, nk = K(x, y); if (!land.has(nk) && !set.has(nk)) set.set(nk, [x, y]); } }
+      cands = [...set.values()]; const step = Math.ceil(cands.length / 120); if (step > 1) cands = cands.filter((_, i) => i % step === 0);
+    }
+    let best = null, bs = 1e18;
+    for (const c of cands) {
+      const g = grow(c, k, login);
+      let x = sX, y = sY, q = sQ; for (const [a, b] of g.region) { const [px, py] = sp(a, b); x += px; y += py; q += px * px + py * py; }
+      const n = cnt + k, rg = Math.sqrt(Math.max(0, q / n - (x / n) ** 2 - (y / n) ** 2));
+      const s = (perim + g.dp) + 5 * rg + 2 * hxNoise(login + '@' + K(c[0], c[1])) + embrace(g.region, oi);
+      if (s < bs) { bs = s; best = g; }
+    }
+    best.region.forEach(([a, b]) => { land.set(K(a, b), oi); const [px, py] = sp(a, b); sX += px; sY += py; sQ += px * px + py * py; });
+    cnt += k; perim += best.dp; flowersOf[oi] = best.region;
+  });
+
+  // hexes: the owner's repos in creation order fill its flowers in the order they were laid down
+  const cells = new Map(); const terr = [];
+  let gx = 0, gy = 0, gn = 0; flowersOf.forEach((fl) => fl.forEach(([a, b]) => { const [q, r] = hxSuperToFine(a, b); const [x, y] = hxPx(q, r); gx += x; gy += y; gn++; }));
+  gx /= gn || 1; gy /= gn || 1;
+  logins.forEach((login, oi) => {
+    const o = owners[login];
+    const repos = o.repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0) || a.name.localeCompare(b.name));
+    const fl = flowersOf[oi]; const mine = [];
+    const fp = fl.map(([a, b]) => { const [q, r] = hxSuperToFine(a, b); return [q, r, ...hxPx(q, r)]; });
+    let tx = gx, ty = gy; if (fp.length > 1) { tx = fp.reduce((s, f) => s + f[2], 0) / fp.length; ty = fp.reduce((s, f) => s + f[3], 0) / fp.length; }
+    fp.forEach(([q, r, cx, cy], fi) => {
+      const need = Math.min(7, repos.length - fi * 7); if (need <= 0) return;
+      let ring = HX_DIRS.slice();
+      if (need < 7) { const vx = tx - cx, vy = ty - cy; ring.sort((u, v) => { const [ux, uy] = hxPx(u[0], u[1]), [wx, wy] = hxPx(v[0], v[1]); return (wx * vx + wy * vy) - (ux * vx + uy * vy); }); }
+      const slots = [[0, 0], ...ring];
+      for (let s = 0; s < need; s++) {
+        const cq = q + slots[s][0], cr = r + slots[s][1]; const [x, y] = hxPx(cq, cr);
+        const c = { q: cq, r: cr, x, y, oi, login, ri: fi * 7 + s, fl: fi, repo: repos[fi * 7 + s] };
+        cells.set(K(cq, cr), c); mine.push(c);
+      }
+    });
+    terr.push({ login, oi, cells: mine, flowers: fl.length, count: repos.length });
+  });
+  return { logins, cells, terr };
 }
-const PLOT = 3.4, PLOT_DX = 4, PLOT_DY = 4.9;
 
 /* ---------- view ---------- */
-class WorldView {
+class HexWorld {
   constructor(canvas, app) {
     this.cv = canvas; this.ctx = canvas.getContext('2d'); this.app = app;
-    this.level = { kind: 'world' }; this.cam = { x: 0, y: 0, z: 10 }; this.hover = null;
-    this.fogPat = makeFogPattern(this.ctx);
+    this.level = { kind: 'world' }; this.cam = { x: 0, y: 0, z: 10 }; this.hover = null; this.focus = null; this.lang = '';
+    this.islands = []; this.links = []; this.sig = '';
+    canvas.setAttribute('aria-label', 'World map. Each hub is a territory of hexagons and each hexagon is one repo. Drag to move, pinch or scroll to zoom, tap a territory to zoom to it, tap a hexagon to open it.');
     this._bind(); new ResizeObserver(() => this.resize()).observe(canvas);
   }
-  setData(owners, towns) { this.owners = owners; this.towns = towns; this.links = worldLinks(owners, towns); this.islands = worldIslands(owners, this.links, towns); if (this.level.kind !== 'world' && !this._levelValid()) this.level = { kind: 'world' }; this.fit(); }
-  _levelValid() { if (this.level.kind === 'nation') return !!this.owners[this.level.login]; if (this.level.kind === 'island') return this.islands.some((i) => i.id === this.level.id); return true; }
-  go(level) { this.level = level; this.hover = null; this.fit(); this.app.onWorldLevel(level); }
-  islandOf(login) { return this.islands.find((i) => i.members.includes(login)); }
-  resize() { const r = this.cv.getBoundingClientRect(), d = window.devicePixelRatio || 1; this.cv.width = Math.max(1, Math.round(r.width * d)); this.cv.height = Math.max(1, Math.round(r.height * d)); this.dpr = d; this.fit(); }
-  _box() {
-    const L = this.level;
-    if (L.kind === 'world') { if (!this.islands.length) return [0, 0, 40, 30]; return [Math.min(...this.islands.map((i) => i.cx - i.R)), Math.min(...this.islands.map((i) => i.cy - i.R)), Math.max(...this.islands.map((i) => i.cx + i.R)), Math.max(...this.islands.map((i) => i.cy + i.R + 1))]; }
-    if (L.kind === 'island') { const i = this.islands.find((q) => q.id === L.id); return [i.cx - i.R, i.cy - i.R, i.cx + i.R, i.cy + i.R + 1]; }
-    const g = plotGrid(this.owners[L.login]); return [-1.2, -2.6, g.cols * PLOT_DX + 0.2, g.rows * PLOT_DY + 0.2];
+
+  /* ----- data ----- */
+  setData(owners, towns) {
+    this.owners = owners; this.towns = towns; this.links = worldLinks(owners, towns);
+    const sig = Object.keys(owners).sort().map((l) => l + ':' + owners[l].repos.length).join('|');
+    if (sig !== this.sig) { this.sig = sig; this._layout(); }
+    this._builtSig = null;
+    if (this.level.kind === 'nation' && !this.owners[this.level.login]) this.level = { kind: 'world' };
+    this.fit();
   }
-  fit() {
-    if (!this.dpr || !this.owners) return;
+  _layout() {
+    const L = hexLayout(this.owners, this.towns); this.lay = L; this.cells = L.cells;
+    const terr = L.terr; this.terr = terr; this.byLogin = new Map(terr.map((t) => [t.login, t]));
+    const mk = () => new Path2D();
+    const P = { fill: terr.map(mk), grid: mk(), seam: mk(), border: mk(), coast: mk(), outline: terr.map(mk), water: mk() };
+    const hexAt = (p, x, y) => { HX_CORNERS.forEach(([cx, cy], i) => (i ? p.lineTo(x + cx, y + cy) : p.moveTo(x + cx, y + cy))); p.closePath(); };
+    const edgeAt = (p, x, y, d) => { const a = HX_CORNERS[d], b = HX_CORNERS[(d + 1) % 6]; p.moveTo(x + a[0], y + a[1]); p.lineTo(x + b[0], y + b[1]); };
+    const adj = terr.map(() => new Set());
+    let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+    for (const c of this.cells.values()) {
+      hexAt(P.fill[c.oi], c.x, c.y); hexAt(P.grid, c.x, c.y);
+      x0 = Math.min(x0, c.x - 0.87); x1 = Math.max(x1, c.x + 0.87); y0 = Math.min(y0, c.y - 1); y1 = Math.max(y1, c.y + 1);
+      const t = terr[c.oi]; t.box = t.box || [1e9, 1e9, -1e9, -1e9]; t.box = [Math.min(t.box[0], c.x - 0.87), Math.min(t.box[1], c.y - 1), Math.max(t.box[2], c.x + 0.87), Math.max(t.box[3], c.y + 1)];
+      HX_DIRS.forEach(([dq, dr], d) => {
+        const n = this.cells.get((c.q + dq) + ',' + (c.r + dr));
+        if (!n) { edgeAt(P.coast, c.x, c.y, d); edgeAt(P.outline[c.oi], c.x, c.y, d); }
+        else if (n.oi !== c.oi) { adj[c.oi].add(n.oi); edgeAt(P.outline[c.oi], c.x, c.y, d); if (c.oi < n.oi) edgeAt(P.border, c.x, c.y, d); }
+        else if (n.fl !== c.fl && K2(c) < K2(n)) edgeAt(P.seam, c.x, c.y, d);
+      });
+    }
+    function K2(c) { return c.q * 100000 + c.r; }
+    // a ring of faint empty hexes around the land, like unrolled map tiles
+    let ring = [...this.cells.values()]; const seen = new Set(this.cells.keys());
+    for (let step = 0; step < 3; step++) {
+      const next = [];
+      for (const c of ring) for (const [dq, dr] of HX_DIRS) { const q = c.q + dq, r = c.r + dr, k = q + ',' + r; if (seen.has(k)) continue; seen.add(k); const [x, y] = hxPx(q, r); hexAt(P.water, x, y); next.push({ q, r }); }
+      ring = next;
+    }
+    this.P = P; this.bounds = [x0, y0, x1, y1]; this.adj = adj;
+    // colours: greedy over the border graph, least-used first
+    const used = new Array(HX_PALETTE.length).fill(0); this.colors = [];
+    terr.forEach((t, i) => {
+      const bad = new Set([...adj[i]].filter((j) => j < i).map((j) => this.colors[j] && this.colors[j].pi));
+      let pi = -1; const order = HX_PALETTE.map((_, p) => p).sort((a, b) => used[a] - used[b] || hxNoise(t.login + a) - hxNoise(t.login + b));
+      for (const p of order) if (!bad.has(p)) { pi = p; break; }
+      if (pi < 0) pi = order[0]; used[pi]++;
+      this.colors[i] = { pi, base: HX_PALETTE[pi], built: shade(HX_PALETTE[pi], 0.9), ink: shade(HX_PALETTE[pi], 0.55) };
+    });
+    // label anchors: the owned hex closest to the middle of the territory
+    terr.forEach((t) => {
+      const mx = t.cells.reduce((s, c) => s + c.x, 0) / t.cells.length, my = t.cells.reduce((s, c) => s + c.y, 0) / t.cells.length;
+      let best = t.cells[0], bd = 1e9; for (const c of t.cells) { const d = Math.hypot(c.x - mx, c.y - my); if (d < bd) { bd = d; best = c; } }
+      t.ax = best.x; t.ay = best.y; t.diam = 2 * Math.sqrt((t.cells.length * 2.598) / Math.PI);
+    });
+    // languages for the highlight filter
+    const lc = {}; for (const t of terr) for (const c of t.cells) { const l = c.repo.lang; if (l) lc[l] = (lc[l] || 0) + 1; }
+    this.langs = Object.entries(lc).sort((a, b) => b[1] - a[1]); this._dim = {};
+  }
+  colorOf(login) { const t = this.byLogin && this.byLogin.get(login); return t ? this.colors[t.oi].base : '#ccc'; }
+  languages() { return this.langs || []; }
+  setLang(l) { this.lang = l || ''; this.draw(); }
+  _builtPaths() {
+    const n = Object.keys(this.towns).length; if (this._builtSig === n) return; this._builtSig = n;
+    this.builtP = this.terr.map(() => new Path2D());
+    for (const c of this.cells.values()) if (this.towns[(c.login + '/' + c.repo.name).toLowerCase()]) {
+      const p = this.builtP[c.oi]; HX_CORNERS.forEach(([cx, cy], i) => (i ? p.lineTo(c.x + cx, c.y + cy) : p.moveTo(c.x + cx, c.y + cy))); p.closePath();
+    }
+  }
+  _dimPath() {
+    if (!this.lang) return null;
+    if (!this._dim[this.lang]) {
+      const p = new Path2D();
+      for (const c of this.cells.values()) if (c.repo.lang !== this.lang) HX_CORNERS.forEach(([cx, cy], i) => (i ? p.lineTo(c.x + cx, c.y + cy) : p.moveTo(c.x + cx, c.y + cy)));
+      this._dim[this.lang] = p;
+    }
+    return this._dim[this.lang];
+  }
+  search(q) {
+    q = String(q || '').trim().toLowerCase(); if (!q || !this.terr) return [];
+    const out = [];
+    for (const t of this.terr) if (t.login.toLowerCase().includes(q)) out.push({ kind: 'owner', login: t.login, label: t.login, sub: t.count + ' repos', rank: t.login.toLowerCase().startsWith(q) ? 0 : 1 });
+    for (const t of this.terr) for (const c of t.cells) if (c.repo.name.toLowerCase().includes(q)) out.push({ kind: 'repo', login: t.login, repo: c.repo.name, label: c.repo.name, sub: t.login, rank: c.repo.name.toLowerCase().startsWith(q) ? 2 : 3 });
+    return out.sort((a, b) => a.rank - b.rank).slice(0, 8);
+  }
+  flyTo(it) {
+    if (it.kind === 'owner') return this.go({ kind: 'nation', login: it.login });
+    const c = [...this.cells.values()].find((q) => q.login === it.login && q.repo.name === it.repo); if (!c) return;
+    this.level = { kind: 'nation', login: it.login }; this.focus = c.q + ',' + c.r; this.hover = null;
+    this._fly({ x: c.x, y: c.y, z: Math.max(this.cam.z, this._cap(40)) }); this.app.onWorldLevel(this.level);
+  }
+
+  /* ----- camera ----- */
+  _cap(z) { return Math.min(z, 44); }
+  go(level) { this.level = level; this.hover = null; this.focus = null; this.fit(true); this.app.onWorldLevel(level); }
+  islandOf() { return null; }
+  resize() { const r = this.cv.getBoundingClientRect(), d = window.devicePixelRatio || 1; this.cv.width = Math.max(1, Math.round(r.width * d)); this.cv.height = Math.max(1, Math.round(r.height * d)); this.dpr = d; if (this.owners) this.fit(); else this.draw(); }
+  _box() { if (this.level.kind === 'nation') { const t = this.byLogin.get(this.level.login); if (t && t.box) return t.box; } return this.bounds || [0, 0, 10, 10]; }
+  fit(animate) {
+    if (!this.dpr || !this.owners || !this.lay) return;
     const [x0, y0, x1, y1] = this._box(); const W = this.cv.width / this.dpr, H = this.cv.height / this.dpr;
-    this.cam = { x: (x0 + x1) / 2, y: (y0 + y1) / 2, z: Math.min(W / (x1 - x0), H / (y1 - y0)) * 0.95 }; this.draw();
+    const pad = this.level.kind === 'nation' ? 0.8 : 0.94;
+    const cam = { x: (x0 + x1) / 2, y: (y0 + y1) / 2, z: Math.min(W / (x1 - x0 + 1), H / (y1 - y0 + 1)) * pad };
+    if (this.level.kind === 'nation') cam.z = this._cap(cam.z); else this._fitZ = cam.z;
+    this._fitted = true;
+    if (animate) this._fly(cam); else { this.cam = cam; this.draw(); }
+  }
+  _fly(cam) {
+    cancelAnimationFrame(this._af);
+    if (!this.dpr || (window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches)) { this.cam = cam; this.draw(); return; }
+    const from = { ...this.cam }, t0 = performance.now(), ms = 420;
+    const step = (t) => { const u = Math.min(1, (t - t0) / ms), e = u * u * (3 - 2 * u); this.cam = { x: from.x + (cam.x - from.x) * e, y: from.y + (cam.y - from.y) * e, z: from.z * Math.pow(cam.z / from.z, e) }; this._draw(); if (u < 1) this._af = requestAnimationFrame(step); };
+    this._af = requestAnimationFrame(step);
   }
   S(x, y) { const c = this.cam; return [(x - c.x) * c.z + this.cv.width / this.dpr / 2, (y - c.y) * c.z + this.cv.height / this.dpr / 2]; }
   U(sx, sy) { const c = this.cam; return [(sx - this.cv.width / this.dpr / 2) / c.z + c.x, (sy - this.cv.height / this.dpr / 2) / c.z + c.y]; }
+  _zmin() { return (this._fitZ || 4) * 0.6; }
+  zoomBy(k) { cancelAnimationFrame(this._af); this.cam.z = Math.max(this._zmin(), Math.min(80, this.cam.z * k)); this.draw(); }
+
+  /* ----- input ----- */
   _bind() {
     const cv = this.cv; let drag = null, moved = false; const pts = new Map(); let pinch = null;
-    cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.offsetX, e.offsetY]); drag = { x: e.offsetX, y: e.offsetY, cx: this.cam.x, cy: this.cam.y }; moved = false; if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), z: this.cam.z }; } });
+    cv.addEventListener('pointerdown', (e) => { cancelAnimationFrame(this._af); cv.setPointerCapture(e.pointerId); pts.set(e.pointerId, [e.offsetX, e.offsetY]); drag = { x: e.offsetX, y: e.offsetY, cx: this.cam.x, cy: this.cam.y }; moved = false; if (pts.size === 2) { const [a, b] = [...pts.values()]; pinch = { d: Math.hypot(a[0] - b[0], a[1] - b[1]), z: this.cam.z }; } });
     cv.addEventListener('pointermove', (e) => {
       if (pts.has(e.pointerId)) pts.set(e.pointerId, [e.offsetX, e.offsetY]);
-      if (pinch && pts.size === 2) { const [a, b] = [...pts.values()]; this.cam.z = Math.max(0.5, Math.min(300, pinch.z * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d)); moved = true; this.draw(); return; }
+      if (pinch && pts.size === 2) { const [a, b] = [...pts.values()]; this.cam.z = Math.max(this._zmin(), Math.min(80, pinch.z * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d)); moved = true; this.draw(); return; }
       if (drag && pts.size === 1) { const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 4) moved = true; if (moved) { this.cam.x = drag.cx - dx / this.cam.z; this.cam.y = drag.cy - dy / this.cam.z; this.draw(); } return; }
-      const h = this._hit(e.offsetX, e.offsetY); if (JSON.stringify(h) !== JSON.stringify(this.hover)) { this.hover = h; this.app.onWorldHover(h); if (this.level.kind !== 'world' || (h && h.kind === 'plot') || this._lastPlot) this.draw(); this._lastPlot = !!(h && h.kind === 'plot'); }
+      const h = this._hit(e.offsetX, e.offsetY); if (JSON.stringify(h) !== JSON.stringify(this.hover)) { this.hover = h; this.app.onWorldHover(h); this.draw(); }
     });
     const up = (e) => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (drag && !moved && !pts.size) this._click(this._hit(e.offsetX, e.offsetY)); if (!pts.size) drag = null; };
     cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
-    cv.addEventListener('wheel', (e) => { e.preventDefault(); const k = Math.exp(-e.deltaY * 0.0015); const [wx, wy] = this.U(e.offsetX, e.offsetY); this.cam.z = Math.max(0.5, Math.min(300, this.cam.z * k)); const [nx, ny] = this.U(e.offsetX, e.offsetY); this.cam.x += wx - nx; this.cam.y += wy - ny; this.draw(); }, { passive: false });
+    cv.addEventListener('wheel', (e) => { e.preventDefault(); cancelAnimationFrame(this._af); const k = Math.exp(-e.deltaY * 0.0015); const [wx, wy] = this.U(e.offsetX, e.offsetY); this.cam.z = Math.max(this._zmin(), Math.min(80, this.cam.z * k)); const [nx, ny] = this.U(e.offsetX, e.offsetY); this.cam.x += wx - nx; this.cam.y += wy - ny; this.draw(); }, { passive: false });
   }
-  _hitIsland(i, x, y) {
-    const dx = x - i.cx, dy = y - i.cy;
-    if (this._detailed(i)) for (const p of i.repos.concat(i.forks)) if (Math.abs(dx - p.px) <= p.half && Math.abs(dy - p.py) <= p.half) return { kind: 'plot', login: p.owner, repo: p.r.name, island: i.id };
-    const th = Math.atan2(dy, dx), r = Math.hypot(dx, dy);
-    if (r > i.coastAt(th) * 1.05) return null;
-    let login = i.members[0];
-    if (i.members.length > 1) { for (const nt of i.nations) { let a = th; while (a < nt.a0) a += Math.PI * 2; while (a >= nt.a0 + Math.PI * 2) a -= Math.PI * 2; if (a <= nt.a1) { login = nt.login; break; } } }
-    return { kind: this.level.kind === 'island' ? 'nation' : 'island', id: i.id, login };
+  _cellAt(wx, wy) {
+    const qf = (HX_SQ3 / 3) * wx - wy / 3, rf = (2 / 3) * wy, sf = -qf - rf;
+    let q = Math.round(qf), r = Math.round(rf), s = Math.round(sf);
+    const dq = Math.abs(q - qf), dr = Math.abs(r - rf), ds = Math.abs(s - sf);
+    if (dq > dr && dq > ds) q = -r - s; else if (dr > ds) r = -q - s;
+    return this.cells.get(q + ',' + r) || null;
   }
   _hit(sx, sy) {
-    const [x, y] = this.U(sx, sy), L = this.level;
-    if (L.kind === 'world') { for (const i of this.islands) { const h = this._hitIsland(i, x, y); if (h) return h; } return null; }
-    if (L.kind === 'island') { const i = this.islands.find((q) => q.id === L.id); return i ? this._hitIsland(i, x, y) : null; }
-    const g = plotGrid(this.owners[L.login]); const p = g.plots.find((q) => x >= q.c * PLOT_DX && x <= q.c * PLOT_DX + PLOT && y >= q.r * PLOT_DY && y <= q.r * PLOT_DY + PLOT);
-    return p ? { kind: 'plot', login: L.login, repo: p.repo.name, n: p.n } : null;
+    if (!this.cells) return null;
+    const [x, y] = this.U(sx, sy), c = this._cellAt(x, y); if (!c) return null;
+    if (this.cam.z >= 8) return { kind: 'plot', login: c.login, repo: c.repo.name, n: c.ri + 1, q: c.q, r: c.r };
+    return { kind: 'nation', login: c.login };
   }
   _click(h) {
     if (!h) return;
-    if (h.kind === 'plot') return this.app.openRepo(h.login, h.repo);
-    if (h.kind === 'island') { const isl = this.islands.find((i) => i.id === h.id); if (isl.members.length === 1) this.go({ kind: 'nation', login: isl.members[0] }); else this.go({ kind: 'island', id: h.id }); }
-    else if (h.kind === 'nation') this.go({ kind: 'nation', login: h.login });
+    const open = h.kind === 'plot' && (this.cam.z >= 24 || (this.level.kind === 'nation' && this.level.login === h.login && this.cam.z >= 12));
+    if (open) return this.app.openRepo(h.login, h.repo);
+    if (this.level.kind === 'nation' && this.level.login === h.login && h.kind === 'plot') { this._fly({ x: this._cellXY(h)[0], y: this._cellXY(h)[1], z: this._cap(Math.max(this.cam.z * 1.8, 26)) }); return; }
+    this.go({ kind: 'nation', login: h.login });
   }
-  zoomBy(k) { this.cam.z = Math.max(0.5, Math.min(300, this.cam.z * k)); this.draw(); }
+  _cellXY(h) { return hxPx(h.q, h.r); }
 
-  /* ---------- drawing ---------- */
+  /* ----- drawing ----- */
   draw() { if (this._raf) return; this._raf = requestAnimationFrame(() => { this._raf = 0; this._draw(); }); }
+  _t(s, x, y, o = {}) { const c = this.ctx; c.font = `${o.w || 400} ${o.size || 11}px system-ui, -apple-system, sans-serif`; c.textAlign = o.align || 'center'; c.textBaseline = 'middle'; c.lineWidth = 3; c.strokeStyle = o.halo || 'rgba(243,238,226,0.92)'; c.lineJoin = 'round'; c.strokeText(s, x, y); c.fillStyle = o.color || PAL.label; c.fillText(s, x, y); }
   _draw() {
-    const ctx = this.ctx; if (!this.dpr || !this.owners) return;
+    const ctx = this.ctx; if (!this.dpr || !this.lay) return;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
-    const W = this.cv.width / this.dpr, H = this.cv.height / this.dpr;
-    ctx.fillStyle = PAL.fog; ctx.fillRect(0, 0, W, H); ctx.fillStyle = this.fogPat; ctx.fillRect(0, 0, W, H);
-    if (!this.islands.length) { this._t('No owners charted yet. Scan a repo to reveal its owner.', W / 2, H / 2, { size: 13 }); return; }
-    if (this.level.kind === 'nation') return this._drawNation();
-    const list = this.level.kind === 'island' ? this.islands.filter((i) => i.id === this.level.id) : this.islands;
-    for (const i of list) { if (!this._onScreen(i)) continue; if (this._detailed(i)) this._drawIsland(i); else this._drawIslandSimple(i); }
-  }
-  _t(s, x, y, o = {}) { const c = this.ctx; c.font = `${o.w || 400} ${o.size || 11}px system-ui, -apple-system, sans-serif`; c.textAlign = o.align || 'center'; c.textBaseline = 'middle'; c.lineWidth = 3; c.strokeStyle = o.halo || 'rgba(243,234,215,0.92)'; c.lineJoin = 'round'; c.strokeText(s, x, y); c.fillStyle = o.color || PAL.label; c.fillText(s, x, y); }
-  _coastPath(i, k) {
-    const c = this.ctx; c.beginPath();
-    for (let j = 0; j < COAST_N; j++) { const th = -Math.PI / 2 + (j / COAST_N) * Math.PI * 2; const r = i.coast[j] * k; const [x, y] = this.S(i.cx + Math.cos(th) * r, i.cy + Math.sin(th) * r); j ? c.lineTo(x, y) : c.moveTo(x, y); }
-    c.closePath();
-  }
-  _detailed(i) { return this.level.kind === 'island' || i.R0 * this.cam.z > 160; }
-  _onScreen(i) { const [x, y] = this.S(i.cx, i.cy), r = i.R * this.cam.z, W = this.cv.width / this.dpr, H = this.cv.height / this.dpr; return x + r > 0 && x - r < W && y + r > 0 && y - r < H; }
-  // world overview: coastline, land and height only (no plots, forks or visitors)
-  _drawIslandSimple(i) {
-    const c = this.ctx, z = this.cam.z;
-    if (!i._path) { // coastline in island units, built once and reused at any zoom
-      i._path = new Path2D(); i._shore = new Path2D();
-      for (let j = 0; j < COAST_N; j += 2) { const th = -Math.PI / 2 + (j / COAST_N) * Math.PI * 2; const r = i.coast[j]; const x = Math.cos(th) * r, y = Math.sin(th) * r; j ? i._path.lineTo(x, y) : i._path.moveTo(x, y); j ? i._shore.lineTo(x * 1.2, y * 1.2) : i._shore.moveTo(x * 1.2, y * 1.2); }
-      i._path.closePath(); i._shore.closePath();
-      // height: total stars on the island, shown as stacked contours inland
-      const stars = i.repos.reduce((a, x) => a + (x.r.stars || 0), 0) + i.forks.reduce((a, x) => a + (x.r.stars || 0), 0);
-      i._levels = Math.min(6, Math.ceil(Math.log10(1 + stars) * 1.6));
+    const W = this.cv.width / this.dpr, H = this.cv.height / this.dpr, z = this.cam.z;
+    ctx.fillStyle = PAL.water; ctx.fillRect(0, 0, W, H);
+    if (!this.terr.length) { this._t('No owners charted yet. Scan a repo to reveal its owner.', W / 2, H / 2, { size: 13 }); return; }
+    this._builtPaths();
+    const P = this.P, lw = (px) => px / z;
+    const focusLogin = this.level.kind === 'nation' ? this.level.login : null;
+    const hovLogin = this.hover ? this.hover.login : null;
+    ctx.save(); ctx.translate(W / 2 - this.cam.x * z, H / 2 - this.cam.y * z); ctx.scale(z, z); ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    // faint empty tiles around the land
+    if (z >= 4) { ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = lw(1); ctx.stroke(P.water); }
+    // territories
+    this.terr.forEach((t, i) => { ctx.fillStyle = this.colors[i].base; ctx.fill(P.fill[i]); ctx.fillStyle = this.colors[i].built; ctx.fill(this.builtP[i]); });
+    // inner hex lines and flower seams
+    if (z >= 5) { ctx.strokeStyle = `rgba(255,255,255,${z >= 14 ? 0.5 : 0.32})`; ctx.lineWidth = lw(1); ctx.stroke(P.grid); }
+    if (z >= 2.5) { ctx.strokeStyle = `rgba(255,252,244,${z >= 9 ? 0.8 : 0.55})`; ctx.lineWidth = lw(z >= 14 ? 2 : z >= 9 ? 1.4 : 1.1); ctx.stroke(P.seam); }
+    // dim everything that is not in focus or not the chosen language
+    const veil = 'rgba(232,230,222,0.62)';
+    if (focusLogin) this.terr.forEach((t, i) => { if (t.login !== focusLogin) { ctx.fillStyle = veil; ctx.fill(P.fill[i]); } });
+    const dp = this._dimPath(); if (dp) { ctx.fillStyle = veil; ctx.fill(dp); }
+    // borders between territories: a pale glow under a dark thread; the coast gets a stronger outline
+    ctx.strokeStyle = 'rgba(255,253,246,0.95)'; ctx.lineWidth = lw(4.2); ctx.stroke(P.border);
+    ctx.strokeStyle = 'rgba(74,62,48,0.72)'; ctx.lineWidth = lw(1.5); ctx.stroke(P.border);
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)'; ctx.lineWidth = lw(5.5); ctx.stroke(P.coast);
+    ctx.strokeStyle = 'rgba(74,62,48,0.85)'; ctx.lineWidth = lw(1.7); ctx.stroke(P.coast);
+    for (const login of new Set([focusLogin, hovLogin])) {
+      if (!login) continue; const t = this.byLogin.get(login); if (!t) continue;
+      ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = lw(5.5); ctx.stroke(P.outline[t.oi]);
+      ctx.strokeStyle = this.colors[t.oi].ink; ctx.lineWidth = lw(2.4); ctx.stroke(P.outline[t.oi]);
     }
-    const [sx, sy] = this.S(i.cx, i.cy);
-    c.save(); c.translate(sx, sy); c.scale(z, z);
-    c.fillStyle = PAL.water; c.fill(i._shore);
-    c.fillStyle = '#EDE4CC'; c.fill(i._path); c.lineWidth = 1.4 / z; c.strokeStyle = PAL.inkSoft; c.stroke(i._path);
-    for (let k = 1; k <= i._levels; k++) { const f = 1 - k / (i._levels + 1.2); c.save(); c.scale(f, f); c.lineWidth = 1 / (z * f); c.strokeStyle = '#B89A68'; if (k === i._levels) { c.fillStyle = '#DCCBA2'; c.fill(i._path); } c.stroke(i._path); c.restore(); }
-    c.restore();
-    const screenR = i.R0 * z;
-    if (screenR < 18) return;
-    const name = i.members.length === 1 ? i.members[0] : i.members.length + ' owners';
-    this._t(name, sx, sy, { w: 700, size: Math.max(11, Math.min(16, screenR * 0.16)) });
-    if (screenR >= 34) { const [lx, ly] = this.S(i.cx, i.cy + i.R - 0.4); this._t(`${i.name} · ${i.repos.length + i.forks.length + i.forkMore} repos`, lx, ly, { color: PAL.labelSoft, size: 11 }); }
+    ctx.restore();
+    // per-hex detail for what is on screen
+    if (z >= 6) this._detail(W, H, z);
+    if (z < 36) this._labels(W, H, z);
   }
-  _drawIsland(i) {
-    const c = this.ctx, z = this.cam.z;
-    // water
-    this._coastPath(i, 1.3); c.fillStyle = PAL.water; c.fill();
-    this._coastPath(i, 1.13); c.fillStyle = '#E3ECE8'; c.fill();
-    // fork islets and sandbars
-    for (const f of i.forks) {
-      const th = f.th, r0 = i.coastAt(th) * 0.98; const [ax, ay] = this.S(i.cx + Math.cos(th) * r0, i.cy + Math.sin(th) * r0), [bx, by] = this.S(i.cx + f.px, i.cy + f.py);
-      c.save(); c.strokeStyle = '#E2D6B8'; c.lineWidth = Math.max(1.5, 0.3 * z); c.setLineDash([4, 3]); c.beginPath(); c.moveTo(ax, ay); c.lineTo(bx, by); c.stroke(); c.restore();
-      c.beginPath(); c.arc(bx, by, 1.1 * z, 0, 7); c.fillStyle = PAL.water; c.fill();
-      c.beginPath(); c.arc(bx, by, 0.8 * z, 0, 7); c.fillStyle = '#EDE4CC'; c.fill(); c.strokeStyle = PAL.inkSoft; c.lineWidth = 1; c.stroke();
-    }
-    // land
-    this._coastPath(i, 1); c.fillStyle = '#EDE4CC'; c.fill(); c.strokeStyle = PAL.inkSoft; c.lineWidth = 1.5; c.stroke();
-    // borders between nations on a shared island
-    for (const b of i.borders) { c.save(); c.strokeStyle = PAL.ink; c.lineWidth = 1.2; c.setLineDash([5, 3]); c.beginPath(); b.forEach(([x, y], k) => { const [sx, sy] = this.S(i.cx + x, i.cy + y); k ? c.lineTo(sx, sy) : c.moveTo(sx, sy); }); c.stroke(); c.restore(); }
-    // hills from stars
-    for (const h of i.hills) { const [x, y] = this.S(i.cx + h.x, i.cy + h.y); for (let k = h.levels; k >= 1; k--) { c.beginPath(); c.arc(x, y, (0.18 + 0.2 * k) * z, 0, 7); if (k === 1) { c.fillStyle = '#DCCBA2'; c.fill(); } c.strokeStyle = '#B89A68'; c.lineWidth = 1; c.stroke(); } }
-    // plots
-    const hov = this.hover;
-    for (const p of i.repos.concat(i.forks)) {
-      const [x, y] = this.S(i.cx + p.px - p.half, i.cy + p.py - p.half); const w = 2 * p.half * z;
-      const isHov = hov && hov.kind === 'plot' && hov.repo === p.r.name && hov.login === p.owner;
-      if (p.town) {
-        c.fillStyle = '#F8F2E4'; c.fillRect(x, y, w, w);
-        if (w > 40 && !p.town.stub && p.town.v >= 2) this._miniTown(p.town, x, y, w);
-        else this._dots(p, x, y, w);
-        c.strokeStyle = isHov ? PAL.coral : PAL.ink; c.lineWidth = isHov ? 2.2 : 1; c.strokeRect(x, y, w, w);
-      } else if (!p.r.size) { c.save(); c.setLineDash([3, 3]); c.strokeStyle = isHov ? PAL.coral : PAL.inkSoft; c.lineWidth = isHov ? 2 : 1; c.strokeRect(x, y, w, w); c.restore(); }
-      else { c.save(); c.translate(x % 8, y % 8); c.fillStyle = this.fogPat; c.fillRect(x - x % 8, y - y % 8, w, w); c.restore(); c.strokeStyle = isHov ? PAL.coral : PAL.inkSoft; c.lineWidth = isHov ? 2 : 1; c.strokeRect(x, y, w, w); }
-    }
-    // repo names around the coast once there is room
-    const step = (2 * Math.PI * i.R0 * z) / Math.max(1, i.repos.length);
-    const screenR = i.R0 * z; const zoomedIn = this.level.kind === 'island' || screenR > 140;
-    if (zoomedIn && step > 26) for (const p of i.repos) {
-      const r = i.coastAt(p.th) + 0.7; const [x, y] = this.S(i.cx + Math.cos(p.th) * r, i.cy + Math.sin(p.th) * r);
-      const align = Math.abs(Math.cos(p.th)) < 0.3 ? 'center' : Math.cos(p.th) > 0 ? 'left' : 'right';
-      const nm = p.r.name.length > 22 ? p.r.name.slice(0, 21) + '…' : p.r.name;
-      this._t(nm, x, y, { size: 11, align, halo: 'rgba(214,227,225,0.95)' });
-    }
-    if (zoomedIn && step > 26) for (const f of i.forks) { const [x, y] = this.S(i.cx + f.px, i.cy + f.py + 1.05); const nm = f.r.name.length > 18 ? f.r.name.slice(0, 17) + '…' : f.r.name; this._t(nm + ' (fork)', x, y, { size: 10, halo: 'rgba(214,227,225,0.95)' }); }
-    // nation names
-    if (screenR < 18 && this.level.kind === 'world') return; // too small for names; hover shows them
-    if (i.members.length === 1) { const [x, y] = this.S(i.cx, i.cy); this._t(i.members[0], x, y, { w: 700, size: Math.max(11, Math.min(18, i.R0 * z * 0.18)) }); }
-    else for (const nt of i.nations) { const r = i.coastAt(nt.mid) * 0.42; const [x, y] = this.S(i.cx + Math.cos(nt.mid) * r, i.cy + Math.sin(nt.mid) * r); this._t(nt.login, x, y, { w: 700, size: 12 }); }
-    if (screenR < 34 && this.level.kind === 'world') return;
-    const [lx, ly] = this.S(i.cx, i.cy + i.R - 0.4); this._t(i.name + (i.forkMore > 0 ? ` · +${i.forkMore} more forks` : ''), lx, ly, { color: PAL.labelSoft, size: 11 });
-  }
-  _dots(p, x, y, w) {
-    const c = this.ctx; const col = langColor(p.town.domLang || 'other'); const rg = rng(hashStr(p.r.name)); const nb = Math.min(9, 2 + Math.round((p.town.files || (p.town.buildings ? p.town.buildings.length : 6)) / 4));
-    for (let k = 0; k < nb; k++) { const bw = w * (0.14 + rg() * 0.14); c.fillStyle = col; c.strokeStyle = PAL.ink; c.lineWidth = 0.5; const bx = x + w * 0.1 + rg() * (w * 0.8 - bw), by = y + w * 0.1 + rg() * (w * 0.8 - bw); c.fillRect(bx, by, bw, bw); if (w > 14) c.strokeRect(bx, by, bw, bw); }
-  }
-  _drawNation() {
-    const c = this.ctx, login = this.level.login, o = this.owners[login], g = plotGrid(o);
-    const [bx0, by0] = this.S(-0.6, -0.6), [bx1, by1] = this.S(g.cols * PLOT_DX, g.rows * PLOT_DY - 0.5);
-    c.fillStyle = PAL.parch; c.fillRect(bx0, by0, bx1 - bx0, by1 - by0);
-    c.strokeStyle = PAL.ink; c.lineWidth = o.type === 'Organization' ? 3 : 1.2; if (o.type !== 'Organization') c.setLineDash([5, 4]); c.strokeRect(bx0, by0, bx1 - bx0, by1 - by0); c.setLineDash([]);
-    const [tx, ty] = this.S((g.cols * PLOT_DX - 0.6) / 2, -1.6);
-    this._t(`${login} · ${o.type === 'Organization' ? 'organization (walled)' : 'user'} · ${o.repos.length} plot${o.repos.length === 1 ? '' : 's'}${o.created ? ' · charted ' + o.created.slice(0, 10) : ''}`, tx, ty, { w: 600, size: 13 });
-    for (const p of g.plots) {
-      const x = p.c * PLOT_DX, y = p.r * PLOT_DY, t = this.towns[(login + '/' + p.repo.name).toLowerCase()];
-      const [sx, sy] = this.S(x, y), s = PLOT * this.cam.z; const hov = this.hover && this.hover.repo === p.repo.name;
-      if (t) { c.fillStyle = '#FBF5E8'; c.fillRect(sx, sy, s, s); if (!t.stub && t.v >= 2) this._miniTown(t, sx, sy, s); else this._dots({ r: p.repo, town: t }, sx, sy, s); }
-      else { c.save(); c.translate(sx % 8, sy % 8); c.fillStyle = this.fogPat; c.fillRect(sx - sx % 8, sy - sy % 8, s, s); c.restore(); if (s > 60) this._t(p.repo.size === 0 ? 'empty plot' : 'fogged · tap to scan', sx + s / 2, sy + s / 2, { size: 10, color: PAL.labelSoft }); }
-      c.strokeStyle = hov ? PAL.coral : PAL.ink; c.lineWidth = hov ? 2.5 : 0.9; c.strokeRect(sx, sy, s, s);
-      if (s > 40) {
-        this._t(`#${p.n}`, sx + 4, sy + 9, { align: 'left', size: 9, color: PAL.labelSoft });
-        c.font = `500 ${s > 110 ? 12 : 10}px system-ui, sans-serif`; let nm = p.repo.name; while (nm.length > 3 && c.measureText(nm).width > s + PLOT_DX * this.cam.z * 0.15) nm = nm.slice(0, -2);
-        if (nm !== p.repo.name) nm = nm.slice(0, -1) + '…';
-        this._t(nm, sx + s / 2, sy + s + Math.min(14, (PLOT_DY - PLOT) * this.cam.z * 0.45), { size: s > 110 ? 12 : 10, w: 500 });
+  _detail(W, H, z) {
+    const ctx = this.ctx; const wantTown = z >= 28; const names = z >= 32;
+    const [ux0, uy0] = this.U(-60, -60), [ux1, uy1] = this.U(W + 60, H + 60);
+    for (const c of this.cells.values()) {
+      if (c.x < ux0 || c.x > ux1 || c.y < uy0 || c.y > uy1) continue;
+      const key = (c.login + '/' + c.repo.name).toLowerCase(); const t = this.towns[key];
+      const [sx, sy] = this.S(c.x, c.y);
+      if (this.lang && c.repo.lang !== this.lang) continue;
+      if (t) {
+        if (wantTown) {
+          if (t.stub && this.app.needTown) this.app.needTown(key);
+          this._miniTown(t, sx, sy, z);
+        } else { ctx.beginPath(); ctx.arc(sx, sy, Math.max(2.2, z * 0.3), 0, 7); ctx.fillStyle = langColor(t.domLang || 'other'); ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = PAL.ink; ctx.stroke(); }
+      } else if (z >= 14 && !names) { ctx.beginPath(); ctx.arc(sx, sy, Math.max(1.5, z * 0.1), 0, 7); ctx.fillStyle = 'rgba(255,255,255,0.65)'; ctx.fill(); }
+      if (names) {
+        let nm = c.repo.name; const maxw = z * 1.55; ctx.font = `500 ${Math.min(12, z * 0.3)}px system-ui, sans-serif`;
+        while (nm.length > 3 && ctx.measureText(nm).width > maxw) nm = nm.slice(0, -2);
+        if (nm !== c.repo.name) nm += '…';
+        this._t(nm, sx, sy + (t ? z * 0.66 : 0), { size: Math.min(12, z * 0.3), w: 500, halo: 'rgba(250,246,236,0.9)' });
       }
     }
+    // hovered or searched hex
+    const mark = (q, r, col, w) => { const [x, y] = hxPx(q, r); const [sx, sy] = this.S(x, y); ctx.beginPath(); HX_CORNERS.forEach(([cx, cy], i) => (i ? ctx.lineTo(sx + cx * z, sy + cy * z) : ctx.moveTo(sx + cx * z, sy + cy * z))); ctx.closePath(); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke(); };
+    if (this.focus) { const [q, r] = this.focus.split(',').map(Number); mark(q, r, PAL.coral, 3); }
+    if (this.hover && this.hover.kind === 'plot') mark(this.hover.q, this.hover.r, PAL.coral, 2.2);
   }
-  // a small copy of a grown town that fills its plot
-  _miniTown(t, sx, sy, s) {
-    const c = this.ctx; const cb = t.core || t.bounds; const k = (s * 0.9) / Math.max(cb.x1 - cb.x0, cb.y1 - cb.y0);
-    const ox = sx + (s - (cb.x1 - cb.x0) * k) / 2 - cb.x0 * k, oy = sy + (s - (cb.y1 - cb.y0) * k) / 2 - cb.y0 * k;
-    c.save(); c.beginPath(); c.rect(sx, sy, s, s); c.clip();
-    if (t.mode === 'list') { for (const b of t.buildings) { c.fillStyle = b.kind === 'link-video' ? PAL.coral : b.kind === 'link-repo' ? PAL.teal : '#E9D3A8'; c.fillRect(ox + b.x * k, oy + b.y * k, Math.max(0.6, b.w * k), Math.max(0.6, b.d * k)); } c.restore(); return; }
-    c.beginPath(); for (const b of t.buildings) { c.moveTo(ox + b.x * k + (b.r + 1.4) * k, oy + b.y * k); c.arc(ox + b.x * k, oy + b.y * k, (b.r + 1.4) * k, 0, 7); } c.fillStyle = PAL.land; c.fill();
-    c.beginPath(); for (const b of t.buildings) { c.moveTo(ox + b.x * k + (b.r + 0.5) * k, oy + b.y * k); c.arc(ox + b.x * k, oy + b.y * k, (b.r + 0.5) * k, 0, 7); } c.fillStyle = PAL.block; c.fill();
-    c.strokeStyle = PAL.streetCase; c.lineCap = 'round';
-    for (const st of t.streets) { c.lineWidth = Math.max(0.6, st.w * k * 0.6); c.beginPath(); st.pts.forEach(([x, y], i) => (i ? c.lineTo(ox + x * k, oy + y * k) : c.moveTo(ox + x * k, oy + y * k))); c.stroke(); }
-    for (const b of t.buildings) { c.save(); c.translate(ox + b.x * k, oy + b.y * k); c.rotate(b.ang || 0); const bw = Math.max(1.6, b.w * k), bd = Math.max(1.6, b.d * k); c.fillStyle = langColor(b.lang); c.fillRect(-bw / 2, -bd / 2, bw, bd); if (bw > 4) { c.strokeStyle = PAL.ink; c.lineWidth = 0.6; c.strokeRect(-bw / 2, -bd / 2, bw, bd); } c.restore(); }
+  // a small copy of a town inside its hex: ground, district blocks and buildings
+  _miniTown(t, sx, sy, z) {
+    const c = this.ctx; const s = z * 1.5;
+    c.save(); c.beginPath(); HX_CORNERS.forEach(([cx, cy], i) => (i ? c.lineTo(sx + cx * z * 0.9, sy + cy * z * 0.9) : c.moveTo(sx + cx * z * 0.9, sy + cy * z * 0.9))); c.closePath(); c.fillStyle = '#F6F0E1'; c.fill(); c.clip();
+    if (t.stub || !t.buildings) {
+      const rg = rng(hashStr(t.key || '')); const col = langColor(t.domLang || 'other');
+      for (let k = 0; k < 6; k++) { const bw = s * (0.14 + rg() * 0.1); c.fillStyle = col; c.fillRect(sx - s / 2 + s * 0.1 + rg() * (s * 0.8 - bw), sy - s / 2 + s * 0.1 + rg() * (s * 0.8 - bw), bw, bw); }
+      c.restore(); return;
+    }
+    const cb = t.core || t.bounds; const k = (s * 0.92) / Math.max(cb.x1 - cb.x0, cb.y1 - cb.y0, 1);
+    const ox = sx - ((cb.x0 + cb.x1) / 2) * k, oy = sy - ((cb.y0 + cb.y1) / 2) * k;
+    if (t.districts) for (const d of t.districts) if (d.block) { c.fillStyle = '#E3D8BE'; c.fillRect(ox + d.block.x0 * k, oy + d.block.y0 * k, (d.block.x1 - d.block.x0) * k, (d.block.y1 - d.block.y0) * k); }
+    for (const b of t.buildings) {
+      c.save(); c.translate(ox + b.x * k, oy + b.y * k); c.rotate(b.ang || 0);
+      const bw = Math.max(1.4, (b.w || 1) * k), bd = Math.max(1.4, (b.d || 1) * k);
+      c.fillStyle = t.mode === 'list' ? (b.kind === 'link-video' ? PAL.coral : b.kind === 'link-repo' ? PAL.teal : '#E9D3A8') : langColor(b.lang); c.fillRect(-bw / 2, -bd / 2, bw, bd);
+      if (bw > 2.5) { c.strokeStyle = PAL.ink; c.lineWidth = 0.6; c.strokeRect(-bw / 2, -bd / 2, bw, bd); }
+      c.restore();
+    }
     c.restore();
+  }
+  _labels(W, H, z) {
+    const ctx = this.ctx; const taken = [];
+    const order = this.terr.slice().sort((a, b) => b.cells.length - a.cells.length);
+    for (const t of order) {
+      const [sx, sy] = this.S(t.ax, t.ay); if (sx < -80 || sx > W + 80 || sy < -40 || sy > H + 40) continue;
+      const roomPx = t.diam * z;
+      let size = Math.max(11, Math.min(22, roomPx * 0.11)); ctx.font = `700 ${size}px system-ui, sans-serif`;
+      const tw = ctx.measureText(t.login).width; if (tw > roomPx * 0.95 && !(this.hover && this.hover.login === t.login)) continue;
+      const two = roomPx > 120 && size >= 12;
+      const box = [sx - tw / 2 - 3, sy - size / 2 - 2, sx + tw / 2 + 3, sy + size / 2 + (two ? size + 2 : 2)];
+      if (taken.some((b) => box[0] < b[2] && b[0] < box[2] && box[1] < b[3] && b[1] < box[3])) continue;
+      taken.push(box);
+      this._t(t.login, sx, sy, { w: 700, size, color: '#3B2A1A', halo: 'rgba(250,246,236,0.78)' });
+      if (two) this._t(`${t.count} repos`, sx, sy + size + 1, { size: 10.5, color: '#5E4B38', halo: 'rgba(250,246,236,0.7)' });
+    }
   }
 }
 
@@ -2815,8 +2934,17 @@ class WorldView {
   /* ---------- state + cache ---------- */
   const state = { owners: {}, towns: {}, current: null, tab: 'town', mode: '3d', find: { hits: [], idx: -1 } };
   function domLang(t) { const L = {}; for (const b of t.buildings) if (b.lang && !['markdown', 'data', 'image', 'other'].includes(b.lang)) L[b.lang] = (L[b.lang] || 0) + (b.lines || 1); return Object.entries(L).sort((a, b) => b[1] - a[1])[0]?.[0] || (t.mode === 'list' ? 'markdown' : 'other'); }
-  function putTown(t) { t.domLang = t.domLang || domLang(t); t.builtAt = t.builtAt || Date.now(); state.towns[t.key.toLowerCase()] = t; }
-  function stubOf(e) { return { key: e.key, owner: e.owner, repo: e.repo, stub: true, public: true, file: e.file, mode: e.mode, parent: e.parent, clearings: (e.ext || []).map((name) => ({ name })), domLang: e.domLang, archetype: { name: e.archetype, traits: e.traits || [] }, builtAt: e.builtAt }; }
+  // names baked into saved towns use the old wording; show the current one
+  const modern = (x) => (typeof x === 'string' ? x.replace(/Civic quarter/g, 'Civic center').replace(/centre/g, 'center').replace(/Centre/g, 'Center').replace(/\btown\b/g, 'hood').replace(/\bTown\b/g, 'Hood') : x);
+  function fixText(t) {
+    if (t.archetype && t.archetype.name) t.archetype.name = modern(t.archetype.name);
+    for (const d of t.districts || []) d.label = modern(d.label);
+    for (const c of t.clearings || []) if (c.label) c.label = modern(c.label);
+    for (const b of t.buildings || []) if (b.landmark && b.landmark.label) b.landmark.label = modern(b.landmark.label);
+    return t;
+  }
+  function putTown(t) { fixText(t); t.domLang = t.domLang || domLang(t); t.builtAt = t.builtAt || Date.now(); state.towns[t.key.toLowerCase()] = t; }
+  function stubOf(e) { return { key: e.key, owner: e.owner, repo: e.repo, stub: true, public: true, file: e.file, mode: e.mode, parent: e.parent, clearings: (e.ext || []).map((name) => ({ name })), domLang: e.domLang, archetype: { name: modern(e.archetype), traits: e.traits || [] }, builtAt: e.builtAt, firstBuilt: e.firstBuilt }; }
   async function loadPublic() {
     if (location.protocol === 'file:') return;
     let ix;
@@ -2879,14 +3007,15 @@ class WorldView {
     },
     onWorldHover: (h) => renderWorldHover(h),
     openRepo: (login, repo) => openKey(login + '/' + repo, true),
+    needTown: (key) => { const t = state.towns[key]; if (t && t.stub && !t._asked) { t._asked = true; ensureTown(key).then(() => worldView.draw()).catch(() => { t._asked = false; }); } },
   };
-  const worldView = new WorldView($('#world-canvas'), app);
+  const worldView = new HexWorld($('#world-canvas'), app);
 
   function setTab(tab) {
     state.tab = tab;
     document.body.dataset.tab = tab;
     $('#tab-town').setAttribute('aria-selected', tab === 'town'); $('#tab-world').setAttribute('aria-selected', tab === 'world');
-    if (tab === 'world') { worldView.setData(state.owners, state.towns); renderCrumbs(); renderWorldPanel(worldView.level); }
+    if (tab === 'world') { worldView.setData(state.owners, state.towns); fillLangs(); renderCrumbs(); renderWorldPanel(worldView.level); }
     else if (state.current) renderSummary(state.current);
     applyView();
   }
@@ -2917,7 +3046,7 @@ class WorldView {
   }
   function requestUrl(target) {
     const r = siteRepo(); if (!r) return null;
-    return `https://github.com/${r}/issues/new?title=${encodeURIComponent('scan: ' + target)}&body=${encodeURIComponent('Requested from the GitHoods page. The bot builds the town and replies here.')}`;
+    return `https://github.com/${r}/issues/new?title=${encodeURIComponent('scan: ' + target)}&body=${encodeURIComponent('Requested from the GitHoods page. The bot builds the hood and replies here.')}`;
   }
 
   // Every search goes to the public map through the relay; the bot rebuilds it from GitHub.
@@ -2985,7 +3114,7 @@ class WorldView {
     const req = requestUrl(t.key);
     html += t.public ? `<p class="pub">On the public map${t.builtAt ? ` · built ${new Date(t.builtAt).toISOString().slice(0, 10)}` : ''}</p>`
       : t.queued ? `<p class="pub">Sent to the public map. It shows up for everyone in a few minutes.</p>`
-      : req ? `<p class="pub local">Only in your browser. <a class="btn small" href="${esc(req)}" target="_blank" rel="noopener">Add to public map</a></p><p class="muted small">Opens a GitHub issue. The map bot rebuilds the town from GitHub and adds it for everyone.</p>` : `<p class="pub local">Only in your browser.</p>`;
+      : req ? `<p class="pub local">Only in your browser. <a class="btn small" href="${esc(req)}" target="_blank" rel="noopener">Add to public map</a></p><p class="muted small">Opens a GitHub issue. The map bot rebuilds the hood from GitHub and adds it for everyone.</p>` : `<p class="pub local">Only in your browser.</p>`;
     if (t.mode === 'code' && t.route && t.route.length > 1) {
       const verb = { start: 'Starts here', imports: 'imports', loads: 'loads', serves: 'serves' };
       html += `<h3>Main route</h3>
@@ -2999,7 +3128,7 @@ class WorldView {
       html += `<h3>Grid</h3>
         <ul class="list">${t.grid.cols.slice(0, 12).map((c) => `<li><span>${esc(c.name)}</span><b>${c.n}</b></li>`).join('')}</ul>`;
     }
-    if (t.mode === 'code' && t.order != null && !(t.v >= LAYOUT)) html += `<h3>Street plan</h3><p class="muted">${t.order > 0.6 ? 'Planned grid' : t.order > 0.3 ? 'Partly planned' : 'Winding old town'} (order ${t.order.toFixed(2)}). Even folder depths and file sizes make a grid; uneven ones make winding streets.</p>`;
+    if (t.mode === 'code' && t.order != null && !(t.v >= LAYOUT)) html += `<h3>Street plan</h3><p class="muted">${t.order > 0.6 ? 'Planned grid' : t.order > 0.3 ? 'Partly planned' : 'Winding old hood'} (order ${t.order.toFixed(2)}). Even folder depths and file sizes make a grid; uneven ones make winding streets.</p>`;
     html += `<h3>History</h3><p class="muted">${t.rings} ring${t.rings === 1 ? '' : 's'} of growth (commits), ${t.visitors.length} visitor${t.visitors.length === 1 ? '' : 's'} (stars), ${t.cranes.length} crane${t.cranes.length === 1 ? '' : 's'} (open issues)${s.created ? `, founded ${esc(s.created.slice(0, 10))}` : ''}.</p>`;
     if (t.notes && t.notes.length) html += `<p class="note">${t.notes.map(esc).join('<br>')}</p>`;
     $('#summary').innerHTML = html;
@@ -3039,8 +3168,7 @@ class WorldView {
   }
   function renderCrumbs() {
     const L = worldView.level, el = $('#crumbs'); const parts = [`<button data-go="world">World</button>`];
-    if (L.kind === 'island') parts.push(`<span>${esc(worldView.islands.find((i) => i.id === L.id)?.name || '')}</span>`);
-    if (L.kind === 'nation') { const isl = worldView.islandOf(L.login); if (isl && isl.members.length > 1) parts.push(`<button data-go="island:${esc(isl.id)}">${esc(isl.name)}</button>`); parts.push(`<span>${esc(L.login)}</span>`); }
+    if (L.kind === 'nation') parts.push(`<span>${esc(L.login)}</span>`);
     el.innerHTML = parts.join('<i>›</i>');
   }
   function renderWorldPanel(L) {
@@ -3049,15 +3177,15 @@ class WorldView {
     if (L.kind === 'nation') {
       const o = state.owners[L.login]; const scanned = o.repos.filter((r) => state.towns[(o.login + '/' + r.name).toLowerCase()]).length;
       const ls = links.filter((l) => l.a === o.login || l.b === o.login);
-      h = `<h2><a href="https://github.com/${esc(o.login)}" target="_blank" rel="noopener">${esc(o.login)}</a></h2><p class="arch"><b>${o.type === 'Organization' ? 'Walled nation (organization)' : 'Nation (user)'}</b></p>
-        <dl class="stats"><div><dt>Plots</dt><dd>${o.repos.length}</dd></div><div><dt>Towns built</dt><dd>${scanned}</dd></div><div><dt>Stars</dt><dd>${fmt(o.repos.reduce((a, r) => a + (r.stars || 0), 0))}</dd></div></dl>
+      h = `<h2><a href="https://github.com/${esc(o.login)}" target="_blank" rel="noopener">${esc(o.login)}</a></h2><p class="arch"><b>${o.type === 'Organization' ? 'Walled hub (organization)' : 'Hub (user)'}</b></p>
+        <dl class="stats"><div><dt>Plots</dt><dd>${o.repos.length}</dd></div><div><dt>Hoods built</dt><dd>${scanned}</dd></div><div><dt>Stars</dt><dd>${fmt(o.repos.reduce((a, r) => a + (r.stars || 0), 0))}</dd></div></dl>
         <h3>Plots</h3><ul class="list">${o.repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0)).map((r, i) => `<li><button class="link" data-open="${esc(o.login)}/${esc(r.name)}">#${i + 1} ${esc(r.name)}</button><b>${state.towns[(o.login + '/' + r.name).toLowerCase()] ? 'town' : r.fork ? 'fork' : ''}</b></li>`).join('')}</ul>
         ${ls.length ? `<h3>Infrastructure</h3><ul class="list">${ls.map((l) => `<li><span>${esc(l.a === o.login ? l.b : l.a)}</span><b>${esc(l.why.join(', '))}</b></li>`).join('')}</ul>` : ''}`;
     } else {
       h = `<h2>The world</h2>
-        <dl class="stats"><div><dt>Nations</dt><dd>${owners.length}</dd></div><div><dt>Islands</dt><dd>${(worldView.islands || []).length}</dd></div><div><dt>Towns</dt><dd>${Object.keys(state.towns).length}</dd></div></dl>
+        <dl class="stats"><div><dt>Hubs</dt><dd>${owners.length}</dd></div><div><dt>Repos</dt><dd>${owners.reduce((a, o) => a + o.repos.length, 0)}</dd></div><div><dt>Hoods</dt><dd>${Object.keys(state.towns).length}</dd></div></dl>
         <h3>Recently built</h3><ul class="list">${Object.values(state.towns).sort((a, b) => (b.builtAt || 0) - (a.builtAt || 0)).slice(0, 12).map((t) => `<li><button class="link" data-town="${esc(t.key.toLowerCase())}">${esc(t.key)}</button><b>${esc(t.archetype ? t.archetype.name : '')}</b></li>`).join('')}</ul>
-        <h3>Nations</h3><ul class="list">${owners.map((o) => `<li><button class="link" data-nation="${esc(o.login)}">${esc(o.login)}</button><b>${o.repos.length}</b></li>`).join('')}</ul>
+        <h3>Hubs</h3><ul class="list">${owners.slice().sort((a, b) => b.repos.length - a.repos.length).map((o) => `<li><button class="link" data-nation="${esc(o.login)}"><i class="sw" style="background:${worldView.colorOf(o.login)}"></i>${esc(o.login)}</button><b>${o.repos.length}</b></li>`).join('')}</ul>
         ${links.length ? `<h3>Infrastructure</h3><ul class="list">${links.map((l) => `<li><span>${esc(l.a)} ↔ ${esc(l.b)}</span><b>${esc(l.why.join(', '))}</b></li>`).join('')}</ul>` : ''}`;
     }
     $('#summary').innerHTML = h; $('#inspector').innerHTML = '';
@@ -3090,7 +3218,7 @@ class WorldView {
     const out = $('#find-results'), F = state.find, q = findBox.value.trim();
     $('#find-bar').hidden = !q; if (!q) { out.innerHTML = ''; return; }
     $('#find-count').textContent = F.hits.length === 1 ? '1 match' : `${F.hits.length} matches`; $('#find-prev').disabled = $('#find-next').disabled = F.hits.length < 2;
-    out.innerHTML = F.hits.length ? F.hits.slice(0, 20).map(({ b, fn, score }, i) => `<li class="${i === F.idx ? 'on' : ''}"><button class="link" data-bid="${b.id}" data-hit="${i}">${esc(b.path)}</button>${score === 4 ? ` <span class="muted small">has ${esc(fn)}</span>` : ''}</li>`).join('') + (F.hits.length > 20 ? `<li class="more">and ${F.hits.length - 20} more, all lit on the map</li>` : '') : '<li class="muted">No match in this town.</li>';
+    out.innerHTML = F.hits.length ? F.hits.slice(0, 20).map(({ b, fn, score }, i) => `<li class="${i === F.idx ? 'on' : ''}"><button class="link" data-bid="${b.id}" data-hit="${i}">${esc(b.path)}</button>${score === 4 ? ` <span class="muted small">has ${esc(fn)}</span>` : ''}</li>`).join('') + (F.hits.length > 20 ? `<li class="more">and ${F.hits.length - 20} more, all lit on the map</li>` : '') : '<li class="muted">No match in this hood.</li>';
   }
   function applyFind(frame) { const t = state.current; if (!t) return; tv().setMatches(state.find.hits.map((h) => h.b), frame); }
   let findT = null;
@@ -3114,19 +3242,34 @@ class WorldView {
     if (sb && state.current) { const st = state.current.route[+sb.dataset.step]; for (const v of allViews()) { v.showRoute = true; v.routeStep = +sb.dataset.step; } tv().focusBuilding(state.current.buildings[st.id], 40); renderSummary(state.current); showMap(); return; }
     const b = e.target.closest('[data-go],[data-open],[data-nation],[data-town]'); if (!b) return;
     if (b.dataset.go === 'world') worldView.go({ kind: 'world' });
-    else if (b.dataset.go) worldView.go({ kind: 'island', id: b.dataset.go.slice(7) });
     else if (b.dataset.nation) worldView.go({ kind: 'nation', login: b.dataset.nation });
     else if (b.dataset.open) { const [o, r] = b.dataset.open.split('/'); app.openRepo(o, r); }
     else if (b.dataset.town) openKey(b.dataset.town, false);
   });
+  /* ---------- map search and language highlight ---------- */
+  const mapFind = $('#mapfind'), mapRes = $('#mapres'), mapLang = $('#maplang'); let mapHits = [];
+  function fillLangs() {
+    const cur = worldView.lang; const ls = worldView.languages();
+    mapLang.innerHTML = '<option value="">All languages</option>' + ls.map(([l, n]) => `<option value="${esc(l)}"${l === cur ? ' selected' : ''}>${esc(l)} · ${n}</option>`).join('');
+  }
+  const closeRes = () => { mapRes.hidden = true; mapRes.innerHTML = ''; mapHits = []; };
+  const pickHit = (i) => { const it = mapHits[i]; if (!it) return; closeRes(); mapFind.value = ''; mapFind.blur(); worldView.flyTo(it); };
+  mapFind.addEventListener('input', () => {
+    mapHits = worldView.search(mapFind.value);
+    mapRes.hidden = !mapHits.length;
+    mapRes.innerHTML = mapHits.map((h, i) => `<li><button type="button" data-hit="${i}"><span>${esc(h.label)}</span><small>${esc(h.sub)}</small></button></li>`).join('');
+  });
+  mapFind.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); pickHit(0); } if (e.key === 'Escape') { closeRes(); mapFind.value = ''; } });
+  mapRes.addEventListener('click', (e) => { const b = e.target.closest('[data-hit]'); if (b) pickHit(+b.dataset.hit); });
+  mapLang.addEventListener('change', () => worldView.setLang(mapLang.value));
   $('#key').onclick = () => { const body = $('#legend-body'); body.innerHTML = ''; body.appendChild(buildLegend(state.tab === 'town' ? state.current : null, !!town3d)); $('#legend').showModal(); };
   const dlg = $('#settings');
   $('#gear').onclick = () => { let tok = ''; try { tok = localStorage.getItem('gh_token') || ''; } catch (e) {} $('#token').value = tok; dlg.showModal(); };
   $('#save-token').onclick = () => { try { const v = $('#token').value.trim(); v ? localStorage.setItem('gh_token', v) : localStorage.removeItem('gh_token'); } catch (e) {} };
-  $('#clear-cache').onclick = () => { try { localStorage.removeItem(STORE); } catch (e) {} state.towns = {}; state.owners = {}; load(); loadPublic().then(renderShelf); progress('Cleared towns saved in this browser. Public map towns remain.', 'ok'); };
+  $('#clear-cache').onclick = () => { try { localStorage.removeItem(STORE); } catch (e) {} state.towns = {}; state.owners = {}; load(); loadPublic().then(renderShelf); progress('Cleared hoods saved in this browser. Public map hoods remain.', 'ok'); };
   function renderShelf() {
     const ts = Object.values(state.towns).sort((a, b) => (b.builtAt || 0) - (a.builtAt || 0));
-    $('#shelf-count').textContent = `${ts.length} town${ts.length === 1 ? '' : 's'}`;
+    $('#shelf-count').textContent = `${ts.length} hood${ts.length === 1 ? '' : 's'}`;
   }
 
   load(); renderShelf(); setMode(state.mode);
