@@ -70,6 +70,15 @@ aside a{color:var(--accent)} aside a.btn{color:#fff}
 .btn.small{padding:5px 10px;font-size:13px;text-decoration:none;display:inline-block}
 .small{font-size:12px}
 #shelf button{white-space:nowrap;border:1px solid var(--line);background:var(--input);border-radius:999px;padding:3px 10px;font-size:12px}
+#legend{width:min(560px,94vw);max-height:86vh;padding:0}
+#legend form{padding:14px 16px}
+.legend-head{display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:var(--panel);padding-bottom:6px}
+.legend-head h3{margin:0}
+.legend h4{margin:14px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.4px;color:var(--soft)}
+.legend ul{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px 12px}
+.legend li{display:flex;gap:10px;align-items:center;font-size:13px;line-height:1.3}
+.legend canvas{position:static;inset:auto;display:block;flex:none;width:52px;height:34px;border-radius:4px;background:#F1E8D4}
+.legend details summary{cursor:pointer;color:var(--accent);margin-top:12px}
 dialog{border:1px solid var(--line);border-radius:12px;background:var(--panel);color:var(--ink);max-width:min(460px,92vw)}
 dialog input{width:100%;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--input);color:var(--ink);font:inherit}
 dialog menu{display:flex;gap:8px;justify-content:flex-end;padding:0;margin:12px 0 0;flex-wrap:wrap}
@@ -95,11 +104,12 @@ dialog menu{display:flex;gap:8px;justify-content:flex-end;padding:0;margin:12px 
   <div class="stage">
     <canvas id="town-canvas"></canvas>
     <canvas id="world-canvas"></canvas>
-    <div class="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zfit" aria-label="Fit" title="Fit">⤢</button></div>
+    <div class="zoom"><button id="key" aria-label="Map key" title="What the shapes mean">?</button><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zfit" aria-label="Fit" title="Fit">⤢</button></div>
   </div>
   <aside><div id="inspector"></div><div id="summary"></div></aside>
 </main>
 <div class="shelf-wrap"><b>On the map · <span id="shelf-count"></span></b><div id="shelf"></div></div>
+<dialog id="legend" aria-label="Map key"><form method="dialog"><div class="legend-head"><h3>Map key</h3><button class="ghost" value="close" aria-label="Close">✕</button></div><div id="legend-body"></div></form></dialog>
 <dialog id="settings"><form method="dialog">
   <h3 style="margin-top:0">Settings</h3>
   <p class="muted">Without a token GitHub allows 60 requests an hour from your address. A small repo costs about 8 requests plus raw file reads, which are not counted. A fine-grained token with public read-only access raises the limit to 5,000. It is stored only in this browser.</p>
@@ -445,7 +455,7 @@ const LANDMARKS = [
   { key: 'lab', label: 'Lab', libs: ['torch', 'tensorflow', 'keras', 'sklearn', 'scikit-learn', 'jax', 'transformers', '@tensorflow/tfjs', 'onnxruntime', 'ultralytics', 'cv2', 'opencv-python'] },
   { key: 'oracle', label: 'Oracle', libs: ['openai', '@anthropic-ai/sdk', 'anthropic', '@google/genai', 'ollama', 'langchain', 'llama_cpp'] },
   { key: 'mill', label: 'Mill', libs: ['numpy', 'pandas', 'scipy', 'polars', 'd3', 'matplotlib', 'plotly', 'magick', 'PIL', 'pillow', 'sharp'] },
-  { key: 'vault', label: 'Vault', libs: ['sqlite3', 'kysely', 'sqlalchemy', 'pg', 'mongoose', 'prisma', '@prisma/client', 'redis', 'ioredis', 'mysql2', 'better-sqlite3', 'peewee', 'diesel', 'gorm.io/gorm'] },
+  { key: 'vault', label: 'Vault', libs: ['sqlite3', 'kysely', 'sqlalchemy', 'pg', 'mongoose', 'prisma', '@prisma/client', 'redis', 'ioredis', 'mysql2', 'better-sqlite3', 'peewee', 'diesel', 'gorm.io/gorm', '@supabase/supabase-js', 'firebase', 'firebase-admin', '@libsql/client', 'drizzle-orm'] },
   { key: 'mast', label: 'Antenna mast', libs: ['RPi', 'RPi.GPIO', 'gpiozero', 'pigpio', 'onoff', 'smbus', 'smbus2', 'spidev', 'serial', 'pyserial', 'board', 'machine'] },
   { key: 'automaton', label: 'Automaton works', libs: ['playwright', 'playwright-core', 'puppeteer', 'selenium', '@playwright/test'] },
   { key: 'studio', label: 'Studio', libs: ['tkinter', 'PyQt5', 'PyQt6', 'PySide6', 'wx', 'gi', 'kivy', 'pygame', 'raylib'] },
@@ -499,6 +509,8 @@ function fileKind(path, sizeBytes, fileInfo) {
   if (VIDEO_EXT.has(ext)) return 'cinema';
   if (lower === '__init__.py' && sizeBytes === 0) return 'stake';
   if (/\.spec$/.test(b)) return 'depot';
+  if (ext === 'sql' || ext === 'prisma' || /(^|\/)migrations?\//.test(path) && ['sql', 'js', 'ts', 'py'].includes(ext)) return 'vault';
+  if (/(^|\/)(supabase|netlify|vercel|firebase)\/functions\/[^/]+\/(index|main)\.(ts|js|mjs)$/.test(path) || /(^|\/)(netlify\/functions|api)\/[^/]+\.(ts|js|mjs|py)$/.test(path)) return 'service';
   if (DATA_EXT.has(ext) && sizeBytes > 20000) return 'warehouse';
   if (ext === 'md' || ext === 'rst' || ext === 'txt') return 'reading';
   if (ENTRY_RE.test(b) && path.split('/').length <= 2) return 'hall';
@@ -547,12 +559,16 @@ function makeResolver(scan, pathSet) {
     let m = url.match(/cdnjs\.cloudflare\.com\/ajax\/libs\/([^/]+)/); if (m) return m[1];
     m = url.match(/(?:cdn\.jsdelivr\.net\/npm|unpkg\.com|esm\.sh|cdn\.skypack\.dev)\/(@[^/@]+\/[^/@]+|[^/@]+)/); if (m) return m[1];
     m = url.match(/code\.jquery\.com/); if (m) return 'jquery';
+    m = url.match(/deno\.land\/x\/([^/@]+)/); if (m) return m[1];
+    if (/deno\.land\/std/.test(url)) return 'deno std';
     m = url.match(/^https?:\/\/([^/]+)/); return m ? m[1] : null;
   }
 
   function resolve(from, lang, spec) {
     const dir = dirname(from);
     if (lang === 'javascript' || lang === 'typescript' || lang === 'html' || lang === 'css') {
+      // Deno and bundler aliases name the same package as a plain import: npm:@supabase/supabase-js@2 -> @supabase/supabase-js
+      if (/^(npm|jsr):/.test(spec)) { const s2 = spec.replace(/^(npm|jsr):\/?/, ''); let nm = s2.startsWith('@') ? s2.split('/').slice(0, 2).join('/') : s2.split('/')[0]; nm = nm.replace(/(.)@[^/]*$/, '$1'); return nm ? { ext: nm } : null; }
       if (/^https?:\/\//.test(spec) || spec.startsWith('//')) { const n = cdnName(spec.startsWith('//') ? 'https:' + spec : spec); return n ? { ext: n.replace(/\.min$/, '') } : null; }
       if (spec.startsWith('.') || spec.startsWith('/') || (lang === 'html' || lang === 'css') && !spec.includes(':')) {
         const base = spec.startsWith('/') ? spec.slice(1) : joinPath(dir, spec.split('?')[0]);
@@ -767,6 +783,14 @@ function buildTown(scan) {
         civic.entries = civic.entries.filter((x) => x !== e);
         districts.push({ key: '::lot:' + e.p, prefix: '', label: titleCase(e.p.replace(/\.[^.]+$/, '')), entries: [e], lot: true });
       }
+    }
+  }
+  if (!districts.some((g) => g.lot)) {
+    const rootCode = civic.entries.filter((e) => e.p.split('/').length === 1 && e.f && !['markdown', 'data', 'image', 'other'].includes(e.lang) && ['house', 'hall', 'service'].includes(fileKind(e.p, e.s, e.f)));
+    if (rootCode.length >= 3) {
+      const html = rootCode.filter((e) => e.lang === 'html').length;
+      civic.entries = civic.entries.filter((e) => !rootCode.includes(e));
+      districts.push({ key: '::root', prefix: '', label: html >= rootCode.length / 2 ? 'Pages' : 'Main', entries: rootCode, root: true });
     }
   }
   // disambiguate labels
@@ -997,12 +1021,24 @@ function buildTown(scan) {
     linked.add(id);
   }
   const dLabel = (id) => { const g = districts.find((x) => x.id === id); return g.civic ? 'Civic' : g.label; };
+  const carried = (a, c) => {
+    const byTarget = new Map();
+    for (const [A, B, n] of edgeList) { const da = A.district, dc = B.district; if ((da === a && dc === c) || (da === c && dc === a)) byTarget.set(B.id, (byTarget.get(B.id) || 0) + n); }
+    const ranked = [...byTarget.entries()].sort((x, y) => y[1] - x[1] || x[0] - y[0]);
+    const total = ranked.reduce((a, r) => a + r[1], 0);
+    return ranked.length ? { top: buildings[ranked[0][0]], share: ranked[0][1] / (total || 1), list: ranked.slice(0, 3).map(([id, n]) => ({ path: buildings[id].path, n })) } : null;
+  };
+  const GENERIC = /^(index|main|init|__init__|mod|lib|app|utils?|helpers?|common|types?)$/i;
   const streets = kept.map((s) => {
     const tgt = (inbound.get(s.a) || 0) >= (inbound.get(s.c) || 0) ? s.a : s.c;
-    return { a: s.a, c: s.c, target: tgt, traffic: s.n, w: s.n ? 0.25 + 0.14 * Math.log2(1 + s.n) : 0.2, base: dLabel(tgt), suffix: s.n >= 10 ? 'Ave' : s.n >= 3 ? 'St' : 'Ln' };
+    // named for the file it carries when one file dominates; otherwise for where it leads
+    const via = s.n ? carried(s.a, s.c) : null;
+    const viaName = via ? basename(via.top.path).replace(/\.[^.]+$/, '') : '';
+    const base = via && via.share >= 0.3 && !GENERIC.test(viaName) ? titleCase(viaName) : dLabel(tgt);
+    return { a: s.a, c: s.c, target: tgt, traffic: s.n, w: s.n ? 0.25 + 0.14 * Math.log2(1 + s.n) : 0.14, base, suffix: s.n >= 10 ? 'Ave' : s.n >= 3 ? 'St' : 'Ln', carries: via ? via.list : [], from: s.a === tgt ? s.c : s.a, empty: !s.n };
   }).sort((x, y) => y.traffic - x.traffic || x.a - y.a);
   const usedNames = new Set();
-  streets.forEach((st) => { let nm = st.base + ' ' + st.suffix; if (usedNames.has(nm)) nm = st.base + ' Way'; if (usedNames.has(nm)) nm = st.base + ' Rd'; if (usedNames.has(nm)) nm = dLabel(st.a === st.target ? st.c : st.a) + ' ' + st.suffix; usedNames.add(nm); st.name = nm; });
+  streets.forEach((st) => { if (st.empty) { st.name = ''; return; } let nm = st.base + ' ' + st.suffix; if (usedNames.has(nm)) nm = st.base + ' Way'; if (usedNames.has(nm)) nm = st.base + ' Rd'; if (usedNames.has(nm)) nm = dLabel(st.a === st.target ? st.c : st.a) + ' ' + st.suffix; usedNames.add(nm); st.name = nm; });
   // planned towns get straight streets; old towns bend
   const curvePts = (st) => {
     const [ax, ay] = H(st.a), [bx, by] = H(st.c);
@@ -1035,7 +1071,9 @@ function buildTown(scan) {
     const bs = buildings.filter((b) => b.district === g.id); const h = hubs.get(g.id);
     const langs = new Map(); bs.forEach((b) => langs.set(b.lang, (langs.get(b.lang) || 0) + b.lines));
     const top = [...langs.entries()].sort((a, b) => b[1] - a[1])[0];
-    return { id: g.id, key: g.key, label: g.label, civic: !!g.civic, outskirts: g.outskirts || null, hub: { x: h.x, y: h.y, r: h.r }, main: g.id === mainId,
+    const kinds = new Map(); bs.forEach((b) => kinds.set(b.kind, (kinds.get(b.kind) || 0) + 1));
+    const role = (kinds.get('vault') || 0) >= bs.length / 2 ? 'data' : (kinds.get('service') || 0) >= bs.length / 2 ? 'services' : g.root ? 'pages' : null;
+    return { id: g.id, key: g.key, label: g.label, civic: !!g.civic, role, outskirts: g.outskirts || null, hub: { x: h.x, y: h.y, r: h.r }, main: g.id === mainId,
       lang: top ? top[0] : 'other', lines: bs.reduce((a, b) => a + b.lines, 0), files: bs.reduce((a, b) => a + b.files, 0), bcount: bs.length };
   });
   const allX = buildings.map((b) => b.x), allY = buildings.map((b) => b.y);
@@ -1108,7 +1146,7 @@ function buildTown(scan) {
     v: 2, mode: 'code', layout: 'grown', key: scan.owner + '/' + scan.repo, owner: scan.owner, repo: scan.repo,
     W, H: H2, bounds: { x0: minX, y0: minY, x1: maxX, y1: maxY }, core, center: [tcx, tcy], order: Math.round(order * 100) / 100,
     districts: dOut, buildings: buildings.map(slimB), segs, links,
-    streets: streets.map((s) => ({ name: s.name, traffic: s.traffic, target: s.target, w: s.w, pts: s.pts.map(([x, y]) => [Math.round(x * 100) / 100, Math.round(y * 100) / 100]) })),
+    streets: streets.map((s) => ({ name: s.name, traffic: s.traffic, target: s.target, from: s.from, carries: s.carries, empty: s.empty, w: s.w, pts: s.pts.map(([x, y]) => [Math.round(x * 100) / 100, Math.round(y * 100) / 100]) })),
     relations, clearings, rings, visitors, cranes,
     monuments: Math.min(6, (scan.counts && scan.counts.releases) || 0),
     archived: scan.meta.archived, fork: scan.meta.fork, parent: scan.meta.parent,
@@ -1250,7 +1288,7 @@ const PAL = {
 };
 function shade(hex, k) { const h = hex.replace('#', ''); const r = [0, 2, 4].map((i) => Math.max(0, Math.min(255, Math.round(parseInt(h.slice(i, i + 2), 16) * k)))); return '#' + r.map((v) => v.toString(16).padStart(2, '0')).join(''); }
 function langColor(l) { return LANG_COLORS[l] || LANG_COLORS.other; }
-const KIND_LABEL = { library: 'Library (README)', plaque: 'Plaque (license)', fence: 'Fence (ignore file)', port: 'Port (deploy config)', customs: 'Customs house (dependency manifest)', warehouse: 'Warehouse (lockfile or data)', works: 'Works (CI workflows)', yard: 'Yard (tests)', gallery: 'Gallery (images)', concert: 'Concert hall (audio)', cinema: 'Cinema (video)', stake: 'Survey stake (empty file)', depot: 'Packing depot (build spec)', reading: 'Reading room (docs)', hall: 'Town hall (entry point)', house: 'Building', block: 'Block (folder)', hut: 'Hut (package)', hutcluster: 'Hut cluster', trash: 'Trash bin (build litter)', shed: 'Shed (tool config)', 'link-article': 'Article', 'link-repo': 'Code repo', 'link-video': 'Video' };
+const KIND_LABEL = { library: 'Library (README)', plaque: 'Plaque (license)', fence: 'Fence (ignore file)', port: 'Port (deploy config)', customs: 'Customs house (dependency manifest)', warehouse: 'Warehouse (lockfile or data)', works: 'Works (CI workflows)', yard: 'Yard (tests)', gallery: 'Gallery (images)', concert: 'Concert hall (audio)', cinema: 'Cinema (video)', stake: 'Survey stake (empty file)', depot: 'Packing depot (build spec)', reading: 'Reading room (docs)', hall: 'Town hall (entry point)', house: 'Building', block: 'Block (folder)', hut: 'Hut (package)', hutcluster: 'Hut cluster', trash: 'Trash bin (build litter)', vault: 'Vault (database schema or migration)', service: 'Relay station (deployed server function)', shed: 'Shed (tool config)', 'link-article': 'Article', 'link-repo': 'Code repo', 'link-video': 'Video' };
 const SPECIAL_LABEL = { square: 'Downtown square (most imported)', power: 'Power plant (shared config)', water: 'Water tower (shared utilities)', dyeworks: 'Dye works (shared theme)', gate: 'Gate (re-exports a district)' };
 
 function makeFogPattern(ctx) {
@@ -1397,6 +1435,8 @@ class TownView {
     if (b.kind === 'library' || b.kind === 'reading' || b.kind === 'hall') return '#F6E7B0';
     if (b.kind === 'plaque') return PAL.sand;
     if (b.kind === 'customs') return '#EFE0B8';
+    if (b.kind === 'vault') return '#D9E1DE';
+    if (b.kind === 'service') return '#E8D9C9';
     if (b.kind === 'depot' || b.kind === 'port' || b.kind === 'shed' || b.kind === 'works') return '#E6D3B8';
     return langColor(b.lang);
   }
@@ -1421,6 +1461,7 @@ class TownView {
     else if (k === 'mill') { ctx.beginPath(); ctx.arc(cx, cy, m * 0.28, 0, 7); for (let i = 0; i < 6; i++) { const a = i * Math.PI / 3; ctx.moveTo(cx, cy); ctx.lineTo(cx + Math.cos(a) * m * 0.28, cy + Math.sin(a) * m * 0.28); } ctx.stroke(); }
     else if (k === 'lab' || k === 'oracle') { ctx.beginPath(); ctx.moveTo(cx - m * 0.1, cy - m * 0.3); ctx.lineTo(cx - m * 0.1, cy - m * 0.05); ctx.lineTo(cx - m * 0.28, cy + m * 0.28); ctx.lineTo(cx + m * 0.28, cy + m * 0.28); ctx.lineTo(cx + m * 0.1, cy - m * 0.05); ctx.lineTo(cx + m * 0.1, cy - m * 0.3); ctx.stroke(); }
     else if (k === 'vault') { ctx.beginPath(); ctx.ellipse(cx, cy - m * 0.15, m * 0.25, m * 0.09, 0, 0, 7); ctx.moveTo(cx - m * 0.25, cy - m * 0.15); ctx.lineTo(cx - m * 0.25, cy + m * 0.2); ctx.ellipse(cx, cy + m * 0.2, m * 0.25, m * 0.09, 0, Math.PI, 0, true); ctx.lineTo(cx + m * 0.25, cy - m * 0.15); ctx.stroke(); }
+    else if (k === 'service') { ctx.beginPath(); ctx.moveTo(cx, cy + m * 0.3); ctx.lineTo(cx, cy - m * 0.05); ctx.stroke(); for (const r of [0.14, 0.26]) { ctx.beginPath(); ctx.arc(cx, cy - m * 0.05, m * r, -Math.PI * 0.8, -Math.PI * 0.2); ctx.stroke(); } ctx.beginPath(); ctx.arc(cx, cy - m * 0.05, Math.max(1, m * 0.04), 0, 7); ctx.fill(); }
     else if (k === 'mast' || k === 'automaton') { ctx.beginPath(); ctx.moveTo(cx, cy - m * 0.35); ctx.lineTo(cx, cy + m * 0.3); ctx.moveTo(cx - m * 0.2, cy + m * 0.3); ctx.lineTo(cx, cy - m * 0.1); ctx.lineTo(cx + m * 0.2, cy + m * 0.3); ctx.stroke(); }
     else if (k === 'assay') { ctx.beginPath(); ctx.moveTo(cx - m * 0.3, cy); ctx.lineTo(cx + m * 0.3, cy); ctx.moveTo(cx, cy - m * 0.3); ctx.lineTo(cx, cy); ctx.stroke(); ctx.strokeRect(cx - m * 0.34, cy, m * 0.14, m * 0.1); ctx.strokeRect(cx + m * 0.2, cy, m * 0.14, m * 0.1); }
     else if (k === 'square') { ctx.beginPath(); ctx.arc(cx, cy, m * 0.36, 0, 7); ctx.fillStyle = PAL.parch; ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.arc(cx, cy, m * 0.12, 0, 7); ctx.fillStyle = PAL.ink; ctx.fill(); }
@@ -1455,13 +1496,15 @@ class TownView {
     if (t.archived) { this.ctx.save(); this.ctx.globalAlpha = 0.25; this._blobs(B.map((b) => [b.x, b.y, b.r + 1.62]), '#9A9284'); this.ctx.restore(); }
     // district ground: one rim pass then fills, so neighbours keep a visible edge
     for (const d of t.districts) this._blobs(B.filter((b) => b.district === d.id).map((b) => [b.x, b.y, b.r + 0.62]).concat([[d.hub.x, d.hub.y, d.hub.r + 0.5]]), PAL.blockRim);
-    for (const d of t.districts) this._blobs(B.filter((b) => b.district === d.id).map((b) => [b.x, b.y, b.r + 0.55]).concat([[d.hub.x, d.hub.y, d.hub.r + 0.43]]), d.civic ? '#F2E7CF' : PAL.block);
+    for (const d of t.districts) this._blobs(B.filter((b) => b.district === d.id).map((b) => [b.x, b.y, b.r + 0.55]).concat([[d.hub.x, d.hub.y, d.hub.r + 0.43]]), d.civic ? '#F2E7CF' : d.role === 'data' ? '#E3E6E1' : d.role === 'services' ? '#ECE3D8' : PAL.block);
     // lanes: every building reaches its square
     for (const b of B) { const h = t._hub.get(b.district); this._line([[b.x, b.y], [h.x, h.y]], 0.15, PAL.lane, { min: 0.8 }); }
     for (const c of t.clearings) if (c.road.dashed) this._line(c.road.pts, 0.06, PAL.ink, { dash: [4, 4], cap: 'butt', min: 1.2 });
     // streets between squares, width by import traffic
-    for (const s of t.streets) this._line(s.pts, s.w + 0.14, PAL.streetCase);
-    for (const s of t.streets) this._line(s.pts, s.w, PAL.street);
+    // links that carry no imports are unpaved trails, there only so every district is reachable
+    for (const s of t.streets) if (s.empty) this._line(s.pts, 0.08, PAL.inkSoft, { dash: [5, 5], cap: 'butt', min: 1.3 });
+    for (const s of t.streets) if (!s.empty) this._line(s.pts, s.w + 0.14, PAL.streetCase);
+    for (const s of t.streets) if (!s.empty) this._line(s.pts, s.w, PAL.street);
     // squares
     for (const d of t.districts) {
       const pts = this._circleW(d.hub.x, d.hub.y, d.hub.r, 28);
@@ -1485,6 +1528,31 @@ class TownView {
     this._drawClearings(t);
     this._drawPeople(t);
     this._drawStreetLabels(t); this._drawDistrictLabels(t);
+    this._drawBuildingNames(t);
+  }
+  _drawBuildingNames(t) {
+    const z = this.cam.z, ctx = this.ctx; const placed = [];
+    // keep clear of clearing and district labels already on the map
+    ctx.font = '400 11px system-ui, sans-serif';
+    for (const c of t.clearings) { const [x, y] = this.S(c.x, c.y); const r = Math.max(5, c.r * 0.55 * z) * (this.mode === 'iso' ? 0.62 : 1); placed.push([x, y + r + 10, ctx.measureText(c.name).width + 6]); placed.push([x, y, r * 2]); }
+    ctx.font = '500 12px system-ui, sans-serif';
+    for (const d of t.districts) { const [x, y] = this.S(d.labelAt.x, d.labelAt.y); placed.push([x, y, ctx.measureText(d.label).width]); }
+    const list = this.mode === 'iso' ? (this._isoOrder || []) : t.buildings;
+    const front = this.mode === 'iso' ? new Map(list.map((b, i) => [b.id, i])) : null;
+    if (this.mode === 'iso') this._covered(-1e6, -1e6, 0); // make sure building outlines are measured
+    ctx.font = '500 10px system-ui, sans-serif';
+    for (const b of [...list].sort((a, c) => c.lines - a.lines)) {
+      if (Math.max(b.w, b.d) * z < 44) continue;
+      const name = b.name.length > 22 ? b.name.slice(0, 21) + '…' : b.name;
+      const tw = ctx.measureText(name).width;
+      let x, y;
+      if (this.mode === 'iso') { [x, y] = this.S(b.x, b.y, this._bH(b)); y -= Math.min(b.w, b.d) * z * 0.35 + 8; }
+      else { [x, y] = this.S(b.x, b.y); y += Math.max(b.w, b.d) * z * 0.5 + 8; }
+      if (placed.some((p) => Math.abs(p[0] - x) < (p[2] + tw) / 2 + 4 && Math.abs(p[1] - y) < 13)) continue;
+      if (this.mode === 'iso' && this._hulls) { const i = front.get(b.id); if (this._hulls.some((q, j) => j > i && x >= q.x0 && x <= q.x1 && y >= q.y0 && y <= q.y1 && inPoly(q.h, x, y))) continue; }
+      placed.push([x, y, tw]);
+      this._text(name, x, y, { size: 10, w: 500, color: '#2E2012' });
+    }
   }
   // imports of the selected building only: ink to what it uses, coral from what uses it
   _drawSelection(t, phase) {
@@ -1504,7 +1572,7 @@ class TownView {
   _drawStreetLabels(t) {
     const ctx = this.ctx; const placed = [];
     for (const s of t.streets) {
-      if (!s.name) continue;
+      if (!s.name || s.empty) continue;
       const sp = s.pts.map(([x, y]) => this.S(x, y));
       let len = 0; for (let i = 1; i < sp.length; i++) len += Math.hypot(sp[i][0] - sp[i - 1][0], sp[i][1] - sp[i - 1][1]);
       ctx.font = '600 11px system-ui, sans-serif'; const tw = ctx.measureText(s.name).width;
@@ -1570,6 +1638,8 @@ class TownView {
     else if (k === 'power') { [-0.15, 0.15].forEach((u) => { ctx.fillStyle = '#F3EEE6'; ctx.fillRect(tx + m * u - 2, ty - m * 0.5, 4, m * 0.5); ctx.strokeRect(tx + m * u - 2, ty - m * 0.5, 4, m * 0.5); }); }
     else if (k === 'water') { ctx.fillStyle = PAL.water; ctx.beginPath(); ctx.ellipse(tx, ty - m * 0.3, m * 0.22, m * 0.1, 0, 0, 7); ctx.fill(); ctx.stroke(); ctx.fillRect(tx - m * 0.22, ty - m * 0.3, m * 0.44, m * 0.25); ctx.strokeRect(tx - m * 0.22, ty - m * 0.3, m * 0.44, m * 0.25); }
     else if (k === 'dyeworks') { [[-0.2, PAL.coral], [0, PAL.sand], [0.2, PAL.teal]].forEach(([u, cc]) => { ctx.beginPath(); ctx.ellipse(tx + m * u, ty, m * 0.1, m * 0.05, 0, 0, 7); ctx.fillStyle = cc; ctx.fill(); ctx.stroke(); }); }
+    else if (k === 'vault') { ctx.fillStyle = '#C9D6D2'; ctx.beginPath(); ctx.ellipse(tx, ty, m * 0.28, m * 0.14, 0, 0, 7); ctx.fill(); ctx.stroke(); ctx.beginPath(); ctx.ellipse(tx, ty, m * 0.16, m * 0.08, 0, 0, 7); ctx.stroke(); }
+    else if (k === 'service') { ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx, ty - m * 0.8); ctx.stroke(); for (const r of [0.15, 0.28]) { ctx.beginPath(); ctx.arc(tx, ty - m * 0.8, m * r, -Math.PI * 0.85, -Math.PI * 0.15); ctx.stroke(); } }
     else if (k === 'depot' || k === 'mast' || (b.deco && b.deco.mast)) { ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(tx, ty - m * 1.1); if (k === 'depot') ctx.lineTo(tx - m * 0.9, ty - m * 0.95); ctx.stroke(); }
     else if (k === 'windowgate') { ctx.fillStyle = '#fff'; ctx.fillRect(tx - m * 0.25, ty - m * 0.45, m * 0.5, m * 0.35); ctx.strokeRect(tx - m * 0.25, ty - m * 0.45, m * 0.5, m * 0.35); }
     else if (k === 'exchange') { for (let i = -1; i <= 1; i++) { ctx.beginPath(); ctx.moveTo(tx + i * m * 0.2, ty - m * 0.05); ctx.lineTo(tx + i * m * 0.2, ty + m * 0.15); ctx.stroke(); } }
@@ -1640,6 +1710,74 @@ class TownView {
     g.rows.forEach((r) => { if (r.n < 20) return; const [x, y] = this.S(0, r.y + g.RH / 2); this._text(r.name, x - 6, y, { align: 'right', w: 500 }); });
     g.cols.forEach((c) => { const [x, y] = this.S(c.x + g.CW / 2, -0.3); this._text(c.name, x + 4, y - 4, { align: 'left', w: 500, color: '#3E5E5A' }); });
   }
+}
+
+/* ---- legend.js ---- */
+/* Map key: every shape is drawn with the same code as the map, so the key always matches it. */
+function buildLegend(town) {
+  const W = 52, H = 34, dpr = window.devicePixelRatio || 1;
+  const canvas = (draw) => { const c = document.createElement('canvas'); c.width = W * dpr; c.height = H * dpr; const g = c.getContext('2d'); g.scale(dpr, dpr); draw(g); return c; };
+  const glyph = (b) => canvas((g) => { const fake = { ctx: g, _bFill: TownView.prototype._bFill }; g.save(); g.translate(W / 2, H / 2); TownView.prototype._planGlyph.call(fake, { deco: {}, landmark: null, special: null, lang: 'javascript', ...b }, -15, -12, 30, 24, false); g.restore(); });
+  const line = (w, color, dash) => canvas((g) => { g.strokeStyle = PAL.streetCase; g.lineCap = dash ? 'butt' : 'round'; if (dash) { g.setLineDash(dash); g.lineWidth = 1.5; g.strokeStyle = color; } else { g.lineWidth = w + 2; } g.beginPath(); g.moveTo(6, H - 8); g.quadraticCurveTo(W / 2, 4, W - 6, H - 10); g.stroke(); if (!dash) { g.strokeStyle = color; g.lineWidth = w; g.stroke(); } });
+  const feature = {
+    street: () => line(7, PAL.street), trail: () => line(0, PAL.inkSoft, [5, 4]),
+    square: () => canvas((g) => { g.beginPath(); g.arc(W / 2, H / 2, 11, 0, 7); g.fillStyle = PAL.street; g.fill(); g.strokeStyle = PAL.streetCase; g.lineWidth = 1.5; g.stroke(); }),
+    lane: () => canvas((g) => { g.strokeStyle = PAL.lane; g.lineWidth = 3; g.lineCap = 'round'; g.beginPath(); g.moveTo(8, H / 2); g.lineTo(W - 8, H / 2); g.stroke(); }),
+    clearing: () => canvas((g) => { g.beginPath(); g.arc(W / 2, H / 2, 14, 0, 7); g.fillStyle = PAL.parch; g.fill(); g.strokeStyle = '#C9B79C'; g.stroke(); g.beginPath(); for (let i = 0; i < 6; i++) { const a = Math.PI / 6 + i * Math.PI / 3; g.lineTo(W / 2 + Math.cos(a) * 9, H / 2 + Math.sin(a) * 9); } g.closePath(); g.strokeStyle = PAL.ink; g.stroke(); }),
+    buildTrail: () => line(0, PAL.ink, [4, 4]),
+    visitor: () => canvas((g) => { g.fillStyle = PAL.coral; for (const [x, y] of [[16, 18], [26, 12], [36, 20]]) { g.beginPath(); g.arc(x, y, 3, 0, 7); g.fill(); } }),
+    crane: () => canvas((g) => { g.strokeStyle = PAL.coral; g.lineWidth = 1.5; g.beginPath(); g.moveTo(30, 28); g.lineTo(30, 8); g.lineTo(16, 8); g.moveTo(19, 8); g.lineTo(19, 16); g.stroke(); }),
+    rings: () => canvas((g) => { g.setLineDash([3, 3]); g.strokeStyle = PAL.inkSoft; for (const r of [8, 12, 16]) { g.beginPath(); g.arc(W / 2, H / 2, r, 0, 7); g.stroke(); } }),
+    uses: () => canvas((g) => { g.strokeStyle = PAL.ink; g.lineWidth = 2; g.beginPath(); g.moveTo(8, 26); g.quadraticCurveTo(26, 4, 44, 24); g.stroke(); g.fillStyle = PAL.ink; g.beginPath(); g.arc(44, 24, 3, 0, 7); g.fill(); }),
+    usedBy: () => canvas((g) => { g.strokeStyle = PAL.coral; g.lineWidth = 2; g.beginPath(); g.moveTo(8, 26); g.quadraticCurveTo(26, 4, 44, 24); g.stroke(); g.fillStyle = PAL.coral; g.beginPath(); g.arc(44, 24, 3, 0, 7); g.fill(); }),
+    lang: (l) => canvas((g) => { g.fillStyle = langColor(l); g.strokeStyle = PAL.ink; g.fillRect(14, 8, 24, 18); g.strokeRect(14, 8, 24, 18); }),
+  };
+  const items = [];
+  const add = (id, icon, text) => items.push({ id, icon, text });
+  // buildings by what the file is
+  const KIND_ORDER = ['house', 'hall', 'library', 'reading', 'plaque', 'fence', 'customs', 'warehouse', 'port', 'works', 'yard', 'gallery', 'concert', 'cinema', 'stake', 'depot', 'vault', 'service', 'shed', 'block', 'hut', 'hutcluster', 'trash'];
+  for (const k of KIND_ORDER) add('kind:' + k, () => glyph({ kind: k }), KIND_LABEL[k] + (k === 'house' ? '. Size grows with lines of code; wide and low means many short functions, narrow means a few long ones.' : ''));
+  for (const [k, label] of Object.entries(SPECIAL_LABEL)) add('special:' + k, () => glyph({ kind: 'house', special: k }), label);
+  const usedHere = new Map(); if (town && town.mode === 'code') { for (const b of town.buildings) if (b.landmark) usedHere.set(b.landmark.key, b.landmark.lib); for (const c of town.clearings) if (c.kind && !usedHere.has(c.kind)) usedHere.set(c.kind, c.name); }
+  for (const lm of LANDMARKS) add('landmark:' + lm.key, () => glyph({ kind: 'house', landmark: { key: lm.key } }), usedHere.has(lm.key) ? `${lm.label}: the file that uses ${usedHere.get(lm.key)} the most. The library itself sits outside town in a clearing with this mark.` : `${lm.label}: the file that leans hardest on ${lm.libs.slice(0, 3).join(', ')}…`);
+  add('f:street', feature.street, 'Street: imports between two districts. Wider means more imports; named for the file it carries most.');
+  add('f:trail', feature.trail, 'Trail: links a district that shares no imports, so every district is reachable.');
+  add('f:square', feature.square, 'Square: the centre of a district. Every building faces its square.');
+  add('f:lane', feature.lane, 'Lane: joins a building to its square.');
+  add('f:clearing', feature.clearing, 'Clearing: an outside library, next to the district that uses it. Known libraries get their own shape.');
+  add('f:buildTrail', feature.buildTrail, 'Dashed path to a clearing: a build or development tool, not used by the running code.');
+  add('f:rings', feature.rings, 'Growth rings: more commits, more rings.');
+  add('f:visitor', feature.visitor, 'Visitors at the edge: one per star, up to 24.');
+  add('f:crane', feature.crane, 'Crane: one per open issue, up to 8.');
+  add('f:uses', feature.uses, 'Tap a building: dark lines go to files it imports.');
+  add('f:usedBy', feature.usedBy, 'Coral lines come from files that import it.');
+  const langs = ['javascript', 'typescript', 'python', 'html', 'css', 'go', 'rust', 'java', 'swift', 'kotlin', 'c', 'cpp', 'ruby', 'php', 'r', 'shell', 'sql', 'other'];
+  for (const l of langs) add('lang:' + l, () => feature.lang(l), 'Colour: ' + (LANG_NAMES[l] || l));
+
+  // what this town actually contains
+  const here = new Set();
+  if (town && town.mode === 'code') {
+    for (const b of town.buildings) { here.add('kind:' + b.kind); if (b.special) here.add('special:' + b.special); if (b.landmark) here.add('landmark:' + b.landmark.key); here.add('lang:' + (langs.includes(b.lang) ? b.lang : 'other')); }
+    if (town.streets.some((s) => !s.empty)) here.add('f:street');
+    if (town.streets.some((s) => s.empty)) here.add('f:trail');
+    here.add('f:square'); here.add('f:lane'); here.add('f:rings'); here.add('f:uses'); here.add('f:usedBy');
+    for (const c of town.clearings) { here.add(c.kind ? 'landmark:' + c.kind : 'f:clearing'); if (c.road && c.road.dashed) here.add('f:buildTrail'); }
+    if (town.clearings.length) here.add('f:clearing');
+    if (town.visitors.length) here.add('f:visitor');
+    if (town.cranes.length) here.add('f:crane');
+  }
+  const wrap = document.createElement('div'); wrap.className = 'legend';
+  const section = (title, list, parent) => { if (!list.length) return; const h = document.createElement('h4'); h.textContent = title; parent.appendChild(h); const ul = document.createElement('ul'); for (const it of list) { const li = document.createElement('li'); li.appendChild(it.icon()); const s = document.createElement('span'); s.textContent = it.text; li.appendChild(s); ul.appendChild(li); } parent.appendChild(ul); };
+  const inTown = items.filter((i) => here.has(i.id)), rest = items.filter((i) => !here.has(i.id));
+  if (inTown.length) section('In this town', inTown, wrap);
+  const det = document.createElement('details'); if (!inTown.length) det.open = true;
+  const sum = document.createElement('summary'); sum.textContent = inTown.length ? `Everything else on GitHoods (${rest.length})` : 'Everything on GitHoods'; det.appendChild(sum);
+  section('Buildings', rest.filter((i) => /^(kind|special):/.test(i.id)), det);
+  section('Known libraries', rest.filter((i) => i.id.startsWith('landmark:')), det);
+  section('Ground and people', rest.filter((i) => i.id.startsWith('f:')), det);
+  section('Colours', rest.filter((i) => i.id.startsWith('lang:')), det);
+  wrap.appendChild(det);
+  return wrap;
 }
 
 /* ---- world.js ---- */
@@ -2090,7 +2228,7 @@ class WorldView {
       : t.queued ? `<p class="pub">Sent to the public map. It shows up for everyone in a few minutes.</p>`
       : req ? `<p class="pub local">Only in your browser. <a class="btn small" href="${esc(req)}" target="_blank" rel="noopener">Add to public map</a></p><p class="muted small">Opens a GitHub issue. The map bot rebuilds the town from GitHub and adds it for everyone.</p>` : `<p class="pub local">Only in your browser.</p>`;
     if (t.mode === 'code') {
-      html += `<h3>Streets <small>named for the district they lead to, width = import traffic</small></h3><ul class="list">${t.streets.slice(0, 10).map((st) => `<li><span>${esc(st.name)}</span><b>${st.traffic}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
+      html += `<h3>Streets <small>named for the file they carry, or where they lead; width = import traffic</small></h3><ul class="list">${t.streets.filter((st) => !st.empty).slice(0, 10).map((st) => `<li><span title="${esc((st.carries || []).map((c) => c.path).join(', '))}">${esc(st.name)}${(st.carries || []).length ? ` <em>${esc(st.carries.map((c) => basename(c.path)).join(', '))}</em>` : ''}</span><b>${st.traffic}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
         <h3>Outside the walls <small>external libraries, nearest the district that uses them</small></h3><ul class="list">${t.clearings.map((c) => `<li><span>${esc(c.name)}${c.label ? ` <em>${esc(c.label)}</em>` : ''}${c.trail ? ' <em>build trail</em>' : ''}</span><b>${c.uses}</b></li>`).join('') || '<li class="muted">None.</li>'}</ul>`;
     } else {
       html += `<h3>Grid</h3><p class="muted">Rows are topics and columns are languages. Each house is one link: coral for video, green for a code repo, sand for an article.</p>
@@ -2170,6 +2308,7 @@ class WorldView {
     else if (b.dataset.open) { const [o, r] = b.dataset.open.split('/'); app.openRepo(o, r); }
     else if (b.dataset.town) openKey(b.dataset.town, false);
   });
+  $('#key').onclick = () => { const body = $('#legend-body'); body.innerHTML = ''; body.appendChild(buildLegend(state.tab === 'town' ? state.current : null)); $('#legend').showModal(); };
   const dlg = $('#settings');
   $('#gear').onclick = () => { let tok = ''; try { tok = localStorage.getItem('gh_token') || ''; } catch (e) {} $('#token').value = tok; dlg.showModal(); };
   $('#save-token').onclick = () => { try { const v = $('#token').value.trim(); v ? localStorage.setItem('gh_token', v) : localStorage.removeItem('gh_token'); } catch (e) {} };
