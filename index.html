@@ -59,6 +59,21 @@ aside h4{margin:0 0 4px;font-size:15px;word-break:break-word}
 .list li span,.list li button{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .list em{font-style:normal;font-size:11px;color:var(--accent);margin-left:4px}
 .link{border:0;background:none;padding:0;color:var(--accent);text-align:left}
+.find-wrap{margin-bottom:10px}
+body[data-tab="world"] .find-wrap{display:none}
+#find{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--input);color:var(--ink);font:inherit}
+#find-results li{border-bottom:1px dashed var(--line)}
+#inspector h5{margin:10px 0 4px;font-size:12px;color:var(--soft);font-weight:600}
+#inspector h5 small{font-weight:400}
+.doc{font-size:13px;border-left:3px solid var(--accent2);padding-left:8px;margin:6px 0}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.chips span,.chips .chip-link{font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--ink);text-decoration:none}
+.chips.mono span{font-family:ui-monospace,Menlo,monospace;font-size:11px}
+.chips .chip-link{color:var(--accent)}
+.chips.coral .chip-link{border-color:#E8735A66}
+.route{margin:8px 0 0;padding-left:20px}
+.route li{margin:6px 0;font-size:13px}
+.route em{font-style:normal;color:var(--accent);font-size:12px}
 #inspector{border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:12px;background:var(--bg);min-height:62px}
 #inspector p{margin:2px 0}
 aside a{color:var(--accent)} aside a.btn{color:#fff}
@@ -106,7 +121,7 @@ dialog menu{display:flex;gap:8px;justify-content:flex-end;padding:0;margin:12px 
     <canvas id="world-canvas"></canvas>
     <div class="zoom"><button id="key" aria-label="Map key" title="What the shapes mean">?</button><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zfit" aria-label="Fit" title="Fit">⤢</button></div>
   </div>
-  <aside><div id="inspector"></div><div id="summary"></div></aside>
+  <aside><div class="find-wrap"><input id="find" type="search" placeholder="Find a file or function in this town" aria-label="Find a file" autocomplete="off" spellcheck="false"><ul id="find-results" class="list"></ul></div><div id="inspector"></div><div id="summary"></div></aside>
 </main>
 <div class="shelf-wrap"><b>On the map · <span id="shelf-count"></span></b><div id="shelf"></div></div>
 <dialog id="legend" aria-label="Map key"><form method="dialog"><div class="legend-head"><h3>Map key</h3><button class="ghost" value="close" aria-label="Close">✕</button></div><div id="legend-body"></div></form></dialog>
@@ -297,6 +312,39 @@ function fileMetrics(text) {
   };
 }
 
+/* What a file holds, by name: functions, classes, routes and its opening comment. Regex only, no AI. */
+function fileInternals(lang, text) {
+  const uniq = (a, n) => [...new Set(a.filter(Boolean))].slice(0, n);
+  const all = (re, g = 1) => { const out = []; let m; re.lastIndex = 0; while ((m = re.exec(text)) && out.length < 200) out.push(m[g]); return out; };
+  let fns = [], cls = [];
+  if (lang === 'python') { fns = all(/^[ \t]*(?:async[ \t]+)?def[ \t]+([A-Za-z_]\w*)/gm); cls = all(/^[ \t]*class[ \t]+([A-Za-z_]\w*)/gm); }
+  else if (lang === 'javascript' || lang === 'typescript' || lang === 'html') {
+    fns = all(/\bfunction\s*\*?\s*([A-Za-z_$][\w$]*)\s*\(/g)
+      .concat(all(/\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)/g))
+      .concat(all(/^[ \t]+(?:async\s+|static\s+|get\s+|set\s+)*([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/gm).filter((n) => !/^(if|for|while|switch|catch|function|return|with)$/.test(n)));
+    cls = all(/\bclass\s+([A-Za-z_$][\w$]*)/g).concat(all(/\b(?:interface|type)\s+([A-Z][\w$]*)\s*[={<]/g));
+  } else if (lang === 'go') { fns = all(/^func\s+(?:\([^)]*\)\s*)?([A-Za-z_]\w*)/gm); cls = all(/^type\s+([A-Za-z_]\w*)\s+(?:struct|interface)/gm); }
+  else if (lang === 'rust') { fns = all(/\bfn\s+([A-Za-z_]\w*)/g); cls = all(/\b(?:struct|enum|trait)\s+([A-Za-z_]\w*)/g); }
+  else if (['java', 'kotlin', 'csharp', 'swift', 'scala', 'dart'].includes(lang)) { fns = all(/\b(?:fun|func|def|void|public|private|protected|static)\s+(?:[\w<>\[\],?]+\s+)?([a-z_]\w*)\s*\(/g); cls = all(/\b(?:class|struct|interface|enum|protocol|object)\s+([A-Z]\w*)/g); }
+  else if (['ruby', 'php', 'lua', 'r', 'shell'].includes(lang)) { fns = all(/^\s*(?:def|function|local\s+function)\s+([A-Za-z_][\w.:]*)/gm).concat(all(/^([A-Za-z_.][\w.]*)\s*<-\s*function/gm)).concat(all(/^([A-Za-z_][\w-]*)\s*\(\)\s*\{/gm)); cls = all(/^\s*class\s+([A-Z]\w*)/gm); }
+  else if (lang === 'sql') { cls = all(/create\s+(?:or\s+replace\s+)?(?:table|view)\s+(?:if\s+not\s+exists\s+)?(?:\w+\.)?"?(\w+)/gi); fns = all(/create\s+(?:or\s+replace\s+)?(?:function|trigger|policy)\s+"?([\w ]+?)"?\s+(?:on|\(|returns|as|for)/gi); }
+  // routes the file serves
+  const routes = uniq(all(/(?:@(?:app|router|bp|api)\.(?:get|post|put|delete|patch|route)|\b(?:app|router)\.(?:get|post|put|delete|patch|use))\(\s*['"`]([^'"`]+)['"`]/g)
+    .concat(all(/HandleFunc\(\s*"([^"]+)"/g)).concat(all(/\.path\s*==\s*['"]([^'"]+)['"]/g)).concat(all(/\.path\.startswith\(\s*['"]([^'"]+)['"]/g))
+    .concat(all(/@(?:Get|Post|Put|Delete|Request)Mapping\(\s*"([^"]+)"/g)), 20);
+  // the file's own first comment or docstring
+  let doc = '';
+  const head = text.slice(0, 4000).replace(/^#!.*\n/, '').replace(/^\s*(?:<!doctype[^>]*>\s*)?/i, '');
+  let m = head.match(/^\s*(?:'''|""")([\s\S]*?)(?:'''|""")/) || head.match(/^\s*\/\*\*?([\s\S]*?)\*\//) || head.match(/^\s*<!--([\s\S]*?)-->/) || head.match(/^((?:\s*(?:\/\/|#|--)[^\n]*\n)+)/);
+  if (m) doc = m[1].replace(/^\s*(?:\*|\/\/|#|--)\s?/gm, '').replace(/\s+/g, ' ').trim();
+  if (!doc && lang === 'html') { const t = text.match(/<title>([^<]{1,120})<\/title>/i); if (t) doc = t[1].trim(); }
+  doc = doc.replace(/\s*[-=*#]{4,}[^-=*#]{0,40}[-=*#]{4,}\s*/g, ' ').replace(/\s*[-=*#]{4,}\s*$/, '').trim();
+  if (/^(eslint|prettier|@ts-|jshint|global |use strict|-\*- coding|coding[:=]|type: ignore|noqa|SPDX-|Copyright)/i.test(doc)) doc = '';
+  // runs on its own: a script entry point
+  const main = /__name__\s*==\s*['"]__main__['"]|^func main\(|\bfn main\(|public static void main\(|require\.main\s*===\s*module|import\.meta\.main/m.test(text);
+  return { fns: uniq(fns, 40), cls: uniq(cls, 20), routes, doc: doc.slice(0, 220), main };
+}
+
 /* ---------- manifests ---------- */
 function parseManifest(name, text) {
   const deps = {}; // name -> 'run' | 'dev'
@@ -404,7 +452,7 @@ async function scanRepo(owner, repo, onProgress = () => {}) {
     if (isManifest(b.p)) { manifests.push({ path: b.p, ...parseManifest(name, text) }); if (!CODE_EXT[extOf(b.p)]) return; }
     const lang = CODE_EXT[extOf(b.p)];
     if (!lang) return;
-    files[b.p] = { lang, imp: parseImports(lang, b.p, text), m: fileMetrics(text) };
+    files[b.p] = { lang, imp: parseImports(lang, b.p, text), m: fileMetrics(text), d: fileInternals(lang, text) };
   });
 
   // keep the tree compact for very large repos
@@ -508,7 +556,7 @@ function fileKind(path, sizeBytes, fileInfo) {
   if (AUDIO_EXT.has(ext)) return 'concert';
   if (VIDEO_EXT.has(ext)) return 'cinema';
   if (lower === '__init__.py' && sizeBytes === 0) return 'stake';
-  if (/\.spec$/.test(b)) return 'depot';
+  if (/\.spec$/.test(b) || /^(makefile|justfile|rakefile)$/i.test(b) || /^(build|make|compile|package|release|dist|bundle|install)[\w.-]*\.(bat|cmd|sh|ps1)$/i.test(b)) return 'depot';
   if (ext === 'sql' || ext === 'prisma' || /(^|\/)migrations?\//.test(path) && ['sql', 'js', 'ts', 'py'].includes(ext)) return 'vault';
   if (/(^|\/)(supabase|netlify|vercel|firebase)\/functions\/[^/]+\/(index|main)\.(ts|js|mjs)$/.test(path) || /(^|\/)(netlify\/functions|api)\/[^/]+\.(ts|js|mjs|py)$/.test(path)) return 'service';
   if (DATA_EXT.has(ext) && sizeBytes > 20000) return 'warehouse';
@@ -857,6 +905,7 @@ function buildTown(scan) {
     }
   });
   buildings.forEach((b) => b.paths.forEach((p) => pathToB.set(p, b.id)));
+  buildings.forEach((b) => { if (!b.folder && b.paths.length === 1 && files[b.paths[0]] && files[b.paths[0]].d) b.info = files[b.paths[0]].d; });
   // directory prefixes -> building (for dir-level resolutions)
   const bByDir = (d) => { for (const b of buildings) if (b.folder && (d === b.path || d.startsWith(b.path + '/'))) return b.id; const hit = buildings.find((b) => b.paths.some((p) => p.startsWith(d + '/'))); return hit ? hit.id : null; };
 
@@ -997,13 +1046,13 @@ function buildTown(scan) {
       const c = cen.get(b.district); b.vx += (c[0] / c[2] - b.x) * 0.05; b.vy += (c[1] / c[2] - b.y) * 0.05;
     }
     for (const [A, B] of edgeList) { const dx = B.x - A.x, dy = B.y - A.y, d = Math.hypot(dx, dy) || 0.01, f = (d - (A.r + B.r) * 1.15) * (A.district === B.district ? 0.01 : 0.002); A.vx += dx / d * f; A.vy += dy / d * f; B.vx -= dx / d * f; B.vy -= dy / d * f; }
-    near((A, B) => sep(A, B, 0.2, 2.2, 0.25));
+    near((A, B) => sep(A, B, 0.2, 1.7, 0.25));
     for (const b of buildings) { b.x += b.vx * cool; b.y += b.vy * cool; b.vx *= 0.6; b.vy *= 0.6; }
   }
 
   // each district gathers around its own square
   const hubs = new Map();
-  for (const g of districts) { const bs = buildings.filter((b) => b.district === g.id); hubs.set(g.id, { id: g.id, x: mean(bs.map((b) => b.x)), y: mean(bs.map((b) => b.y)), r: 0.55 + 0.12 * Math.log2(1 + bs.length) }); }
+  for (const g of districts) { const bs = buildings.filter((b) => b.district === g.id); hubs.set(g.id, { id: g.id, x: mean(bs.map((b) => b.x)), y: mean(bs.map((b) => b.y)), r: bs.length <= 2 ? 0.32 : 0.45 + 0.1 * Math.log2(1 + bs.length) }); }
   const mainId = dOrder[0];
   // streets join districts that import each other; busiest first, never crossing another street
   const cross = (p1, p2, p3, p4) => { const o = (a, b, c) => Math.sign((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])); return o(p1, p2, p3) * o(p1, p2, p4) < 0 && o(p3, p4, p1) * o(p3, p4, p2) < 0; };
@@ -1034,18 +1083,32 @@ function buildTown(scan) {
     // named for the file it carries when one file dominates; otherwise for where it leads
     const via = s.n ? carried(s.a, s.c) : null;
     const viaName = via ? basename(via.top.path).replace(/\.[^.]+$/, '') : '';
-    const base = via && via.share >= 0.3 && !GENERIC.test(viaName) ? titleCase(viaName) : dLabel(tgt);
-    return { a: s.a, c: s.c, target: tgt, traffic: s.n, w: s.n ? 0.25 + 0.14 * Math.log2(1 + s.n) : 0.14, base, suffix: s.n >= 10 ? 'Ave' : s.n >= 3 ? 'St' : 'Ln', carries: via ? via.list : [], from: s.a === tgt ? s.c : s.a, empty: !s.n };
+    const shared = kept.filter((k) => k.n && (k.a === tgt || k.c === tgt)).length > 1;
+    const origin = s.a === tgt ? s.c : s.a;
+    const base = shared ? dLabel(origin) : via && via.share >= 0.3 && !GENERIC.test(viaName) ? titleCase(viaName) : dLabel(tgt);
+    return { a: s.a, c: s.c, target: tgt, traffic: s.n, w: s.n ? 0.25 + 0.14 * Math.log2(1 + s.n) : 0.14, base, suffix: s.n >= 10 ? 'Ave' : s.n >= 3 ? 'St' : 'Ln', shared, carries: via ? via.list : [], from: s.a === tgt ? s.c : s.a, empty: !s.n };
   }).sort((x, y) => y.traffic - x.traffic || x.a - y.a);
   const usedNames = new Set();
-  streets.forEach((st) => { if (st.empty) { st.name = ''; return; } let nm = st.base + ' ' + st.suffix; if (usedNames.has(nm)) nm = st.base + ' Way'; if (usedNames.has(nm)) nm = st.base + ' Rd'; if (usedNames.has(nm)) nm = dLabel(st.a === st.target ? st.c : st.a) + ' ' + st.suffix; usedNames.add(nm); st.name = nm; });
+  // a base is used once; a second street with the same base names both ends instead
+  const usedBase = new Set();
+  streets.forEach((st) => { if (st.empty) { st.name = ''; return; } let base = st.base; if (usedBase.has(base)) base = dLabel(st.from) + '–' + dLabel(st.target); usedBase.add(base); let nm = base + ' ' + st.suffix; if (usedNames.has(nm)) nm = base + ' Way'; usedNames.add(nm); st.name = nm; });
   // planned towns get straight streets; old towns bend
-  const curvePts = (st) => {
+  const sample = (st, bend) => {
     const [ax, ay] = H(st.a), [bx, by] = H(st.c);
-    const bend = planned ? 0 : (1 - order) * 0.22 * (rnd() * 2 - 1);
     const cx = (ax + bx) / 2 - (by - ay) * bend, cy = (ay + by) / 2 + (bx - ax) * bend;
     const pts = []; for (let i = 0; i <= 16; i++) { const t = i / 16; pts.push([(1 - t) * (1 - t) * ax + 2 * (1 - t) * t * cx + t * t * bx, (1 - t) * (1 - t) * ay + 2 * (1 - t) * t * cy + t * t * by]); }
     return pts;
+  };
+  const curvePts = (st) => {
+    const jitter = planned ? 0 : (1 - order) * 0.12 * (rnd() * 2 - 1);
+    const others = buildings.filter((b) => b.district !== st.a && b.district !== st.c);
+    let best = null, bestScore = Infinity;
+    for (const bend of [0, 0.12, -0.12, 0.24, -0.24, 0.36, -0.36]) {
+      const pts = sample(st, bend + jitter); let score = Math.abs(bend) * 0.5;
+      for (const b of others) for (let k = 0; k < pts.length; k += 2) { const d = Math.hypot(pts[k][0] - b.x, pts[k][1] - b.y); const over = b.r + 0.55 + st.w / 2 - d; if (over > 0) score += over; }
+      if (score < bestScore - 1e-9) { bestScore = score; best = pts; }
+    }
+    return best;
   };
   streets.forEach((st) => { st.pts = curvePts(st); });
 
@@ -1059,7 +1122,7 @@ function buildTown(scan) {
       for (const st of streets) if (b.x > st.bb[0] && b.x < st.bb[2] && b.y > st.bb[1] && b.y < st.bb[3]) for (let k = 0; k < st.pts.length - 1; k++) { const [d, qx, qy] = segDist(b.x, b.y, st.pts[k], st.pts[k + 1]); const want = b.r * 0.85 + st.w / 2 + 0.25; if (d < want) { b.vx += (b.x - qx) / (d || 0.01) * (want - d) * 0.3; b.vy += (b.y - qy) / (d || 0.01) * (want - d) * 0.3; } }
       for (const h of hubs.values()) { const d = Math.hypot(b.x - h.x, b.y - h.y); const want = b.r * 0.8 + h.r + 0.3; if (d < want) { b.vx += (b.x - h.x) / (d || 0.01) * (want - d) * 0.3; b.vy += (b.y - h.y) / (d || 0.01) * (want - d) * 0.3; } }
     }
-    near((A, B) => sep(A, B, 0.1, 1.2, 0.25));
+    near((A, B) => sep(A, B, 0.1, 0.95, 0.25));
     for (const b of buildings) { b.x += b.vx; b.y += b.vy; }
   }
   if (planned) buildings.forEach((b) => { b.x = Math.round(b.x * 2) / 2; b.y = Math.round(b.y * 2) / 2; });
@@ -1106,7 +1169,8 @@ function buildTown(scan) {
     const D = bestD != null ? dById.get(bestD) : dOut.find((d) => d.civic) || dOut[0];
     const ang = Math.atan2(D.hub.y - tcy, D.hub.x - tcx) || 0;
     const dev = e.declared === 'dev' || e.build;
-    return { name: e.name, uses: e.n, kind: e.lm ? e.lm.key : null, label: e.lm ? e.lm.label : null, ang, r: 1.1 + 0.28 * Math.log2(1 + e.n), from: D.id, trail: dev && e.n === 0, std: e.std };
+    const users = [...e.byB.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0]).map(([id]) => id);
+    return { name: e.name, uses: e.n, kind: e.lm ? e.lm.key : null, label: e.lm ? e.lm.label : null, ang, r: 1.1 + 0.28 * Math.log2(1 + e.n), from: D.id, users: users.slice(0, 8), trail: dev && e.n === 0, std: e.std };
   });
   clearings.sort((a, b) => a.ang - b.ang);
   const minGap = 0.5;
@@ -1114,9 +1178,36 @@ function buildTown(scan) {
   clearings.forEach((c) => {
     const e = extent(c.ang); const d = e + 1.2 + c.r;
     c.x = tcx + Math.cos(c.ang) * d; c.y = tcy + Math.sin(c.ang) * d;
-    const sx = tcx + Math.cos(c.ang) * (e - 1.0), sy = tcy + Math.sin(c.ang) * (e - 1.0);
+    // the road starts at the user nearest the clearing; land drawn over it hides the inner part
+    const near = c.users.map((id) => buildings[id]).sort((a, b) => Math.hypot(a.x - c.x, a.y - c.y) - Math.hypot(b.x - c.x, b.y - c.y))[0];
+    const sx = near ? near.x : tcx + Math.cos(c.ang) * (e - 1.0), sy = near ? near.y : tcy + Math.sin(c.ang) * (e - 1.0);
     c.road = { pts: [[sx, sy], [c.x, c.y]], dashed: c.trail };
   });
+
+  // ---- main route: start at the entry file and follow what it uses, heaviest first
+  const outs = new Map(); for (const [A, B, n] of edgeList) { if (!outs.has(A.id)) outs.set(A.id, []); outs.get(A.id).push([B.id, n]); }
+  outs.forEach((l) => l.sort((x, y) => y[1] - x[1] || x[0] - y[0]));
+  const reach = (id) => { const seen = new Set([id]), st = [id]; while (st.length) { const c = st.pop(); for (const [d] of outs.get(c) || []) if (!seen.has(d)) { seen.add(d); st.push(d); } } return seen.size; };
+  const bLibs = new Map(); for (const [name, e] of ext) for (const [bid, n] of e.byB) { if (!bLibs.has(bid)) bLibs.set(bid, []); bLibs.get(bid).push([name, n]); }
+  const codeBs = buildings.filter((b) => !['library', 'reading', 'plaque', 'fence', 'customs', 'warehouse', 'gallery', 'yard', 'trash', 'stake'].includes(b.kind));
+  const cands = codeBs.filter((b) => b.kind === 'hall' || (b.info && b.info.main));
+  const startPool = (cands.length ? cands : codeBs.filter((b) => b.inDeg === 0 && b.outDeg > 0)).concat(codeBs.filter((b) => b.outDeg > 0));
+  let entry = null, bestR = 0; for (const b of startPool) { const r = reach(b.id) + (b.kind === 'hall' ? 0.5 : 0); if (r > bestR) { bestR = r; entry = b; } }
+  const serves = new Map(); for (const sid of servers) serves.set(sid, [...metricsByB.entries()].filter(([id, m]) => m.fetchLocal && id !== sid).map(([id, m]) => [id, m.fetchLocal]));
+  const reachN = new Map(); codeBs.forEach((b) => reachN.set(b.id, reach(b.id)));
+  outs.forEach((l) => l.sort((x, y) => y[1] - x[1] || (reachN.get(y[0]) || 0) - (reachN.get(x[0]) || 0) || buildings[y[0]].lines - buildings[x[0]].lines));
+  const route = [];
+  if (entry && bestR > 1.5) {
+    const seen = new Set();
+    const walk = (id, depth, parent, n, how) => {
+      if (route.length >= 10 || seen.has(id) || depth > 5) return; seen.add(id);
+      const libs = (bLibs.get(id) || []).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([nm]) => nm);
+      route.push({ id, depth, from: parent, n, libs, how: parent == null ? 'start' : how === 'imports' && buildings[parent].lang === 'html' ? 'loads' : how });
+      for (const [d, w] of (outs.get(id) || []).slice(0, 4)) walk(d, depth + 1, id, w, 'imports');
+      for (const [d, w] of (serves.get(id) || []).slice(0, 3)) walk(d, depth + 1, id, w, 'serves');
+    };
+    walk(entry.id, 0, null, 0);
+  }
 
   // ---- history and people
   const commits = scan.counts && scan.counts.commits != null ? scan.counts.commits : 1;
@@ -1147,7 +1238,7 @@ function buildTown(scan) {
     W, H: H2, bounds: { x0: minX, y0: minY, x1: maxX, y1: maxY }, core, center: [tcx, tcy], order: Math.round(order * 100) / 100,
     districts: dOut, buildings: buildings.map(slimB), segs, links,
     streets: streets.map((s) => ({ name: s.name, traffic: s.traffic, target: s.target, from: s.from, carries: s.carries, empty: s.empty, w: s.w, pts: s.pts.map(([x, y]) => [Math.round(x * 100) / 100, Math.round(y * 100) / 100]) })),
-    relations, clearings, rings, visitors, cranes,
+    relations, clearings, rings, visitors, cranes, route,
     monuments: Math.min(6, (scan.counts && scan.counts.releases) || 0),
     archived: scan.meta.archived, fork: scan.meta.fork, parent: scan.meta.parent,
     stats: {
@@ -1162,7 +1253,7 @@ function buildTown(scan) {
 
 function slimB(b) {
   const r2 = (v) => Math.round(v * 1000) / 1000;
-  return { id: b.id, name: b.name, path: b.path, x: r2(b.x), y: r2(b.y), w: r2(b.w), d: r2(b.d), h: r2(b.h), ang: r2(b.ang || 0), r: r2(b.r || 0), lang: b.lang, kind: b.kind, special: b.special || null, landmark: b.landmark ? { key: b.landmark.key, label: b.landmark.label, lib: b.landmark.lib } : null, deco: b.deco, lines: b.lines, files: b.files, inDeg: b.inDeg, outDeg: b.outDeg, district: b.district, folder: !!b.folder, count: b.count || 0 };
+  return { id: b.id, name: b.name, path: b.path, x: r2(b.x), y: r2(b.y), w: r2(b.w), d: r2(b.d), h: r2(b.h), ang: r2(b.ang || 0), r: r2(b.r || 0), info: b.info || null, lang: b.lang, kind: b.kind, special: b.special || null, landmark: b.landmark ? { key: b.landmark.key, label: b.landmark.label, lib: b.landmark.lib } : null, deco: b.deco, lines: b.lines, files: b.files, inDeg: b.inDeg, outDeg: b.outDeg, district: b.district, folder: !!b.folder, count: b.count || 0 };
 }
 
 function classify({ districts, buildings, scan, edges, streets }) {
@@ -1525,6 +1616,7 @@ class TownView {
       }
     }
     this._drawSelection(t, 'over');
+    if (this.showRoute) this._drawRoute(t);
     this._drawClearings(t);
     this._drawPeople(t);
     this._drawStreetLabels(t); this._drawDistrictLabels(t);
@@ -1553,6 +1645,35 @@ class TownView {
       placed.push([x, y, tw]);
       this._text(name, x, y, { size: 10, w: 500, color: '#2E2012' });
     }
+  }
+  // the main route: numbered stops joined by a coral path, libraries used at each stop
+  _drawRoute(t) {
+    if (!t.route || !t.route.length) return;
+    const ctx = this.ctx, lift = (b) => (this.mode === 'iso' ? this._bH(b) : 0);
+    const P = (id) => { const b = t.buildings[id]; return this.S(b.x, b.y, lift(b)); };
+    ctx.save(); ctx.lineCap = 'round';
+    for (const st of t.route) {
+      if (st.from == null) continue;
+      const a = P(st.from), b = P(st.id); const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2 - Math.hypot(b[0] - a[0], b[1] - a[1]) * 0.18;
+      ctx.strokeStyle = 'rgba(251,245,232,0.9)'; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(...a); ctx.quadraticCurveTo(mx, my, ...b); ctx.stroke();
+      ctx.strokeStyle = PAL.coral; ctx.lineWidth = 3.5; if (st.how === 'serves') ctx.setLineDash([7, 5]); ctx.beginPath(); ctx.moveTo(...a); ctx.quadraticCurveTo(mx, my, ...b); ctx.stroke(); ctx.setLineDash([]);
+      // arrowhead near the destination
+      const ang = Math.atan2(b[1] - my, b[0] - mx), ax = b[0] - Math.cos(ang) * 13, ay = b[1] - Math.sin(ang) * 13;
+      ctx.fillStyle = PAL.coral; ctx.beginPath(); ctx.moveTo(ax + Math.cos(ang) * 7, ay + Math.sin(ang) * 7); ctx.lineTo(ax + Math.cos(ang + 2.4) * 7, ay + Math.sin(ang + 2.4) * 7); ctx.lineTo(ax + Math.cos(ang - 2.4) * 7, ay + Math.sin(ang - 2.4) * 7); ctx.closePath(); ctx.fill();
+    }
+    // lines out to the libraries each stop uses
+    for (const st of t.route) for (const lib of st.libs) { const c = t.clearings.find((x) => x.name === lib); if (!c) continue; const a = P(st.id), b = this.S(c.x, c.y); ctx.strokeStyle = PAL.coral; ctx.globalAlpha = 0.55; ctx.lineWidth = 2; ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
+    t.route.forEach((st, i) => {
+      const [x, y] = P(st.id); const r = 10;
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fillStyle = this.routeStep === i ? PAL.ink : PAL.coral; ctx.fill(); ctx.strokeStyle = '#FBF5E8'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(i + 1), x, y + 0.5);
+    });
+    ctx.restore();
+  }
+  focusBuilding(b, zoom) {
+    const [vx, vy] = this.P(b.x, b.y, this.mode === 'iso' ? this._bH(b) / 2 : 0);
+    this.cam.x = vx; this.cam.y = vy; if (zoom) this.cam.z = Math.max(this.cam.z, zoom);
+    this.pinned = { type: 'building', b }; this.hover = this.pinned; this.draw(); this.onHover(this.pinned, true);
   }
   // imports of the selected building only: ink to what it uses, coral from what uses it
   _drawSelection(t, phase) {
@@ -1592,8 +1713,11 @@ class TownView {
     const ctx = this.ctx;
     for (const d of t.districts) {
       if (d.bcount < 1) continue;
-      const [x, y] = this.S(d.labelAt.x, d.labelAt.y);
-      ctx.font = '500 12px system-ui, sans-serif'; if (this._covered(x, y, ctx.measureText(d.label).width)) continue;
+      let [x, y] = this.S(d.labelAt.x, d.labelAt.y);
+      ctx.font = '500 12px system-ui, sans-serif'; const tw = ctx.measureText(d.label).width;
+      const clash = (px, py) => t.clearings.some((c) => { const [cx, cy] = this.S(c.x, c.y); const r = Math.max(5, c.r * 0.55 * this.cam.z); ctx.font = '400 11px system-ui, sans-serif'; const cw = ctx.measureText(c.name).width; return (Math.abs(px - cx) < (tw + cw) / 2 + 4 && Math.abs(py - (cy + r + 10)) < 14) || Math.hypot(px - cx, py - cy) < r + tw / 2; });
+      if (clash(x, y)) { const [hx, hy] = this.S(d.hub.x, d.hub.y); x = hx; y = hy + Math.max(14, d.hub.r * this.cam.z + 10); if (clash(x, y)) continue; }
+      ctx.font = '500 12px system-ui, sans-serif'; if (this._covered(x, y, tw)) continue;
       if (this.cam.z * Math.sqrt(d.bcount) < 9 && !d.main) continue;
       this._text(d.label, x, y, { w: 500, size: 12, color: PAL.labelSoft });
     }
@@ -2167,6 +2291,7 @@ class WorldView {
   function showTown(t) {
     // towns from the old rectangle layout ask the map bot to rebuild them
     if (t.mode === 'code' && !(t.v >= 2) && !t._rebuildAsked) { t._rebuildAsked = true; sendToMap(t.key, null); }
+    if (state.current !== t) { townView.showRoute = false; townView.routeStep = null; findBox.value = ''; $('#find-results').innerHTML = ''; }
     state.current = t; setTab('town'); townView.setTown(t); renderSummary(t);
     $('#q').value = t.key; history.replaceState(null, '', '#' + t.key);
   }
@@ -2253,8 +2378,14 @@ class WorldView {
     html += t.public ? `<p class="pub">On the public map${t.builtAt ? ` · built ${new Date(t.builtAt).toISOString().slice(0, 10)}` : ''}</p>`
       : t.queued ? `<p class="pub">Sent to the public map. It shows up for everyone in a few minutes.</p>`
       : req ? `<p class="pub local">Only in your browser. <a class="btn small" href="${esc(req)}" target="_blank" rel="noopener">Add to public map</a></p><p class="muted small">Opens a GitHub issue. The map bot rebuilds the town from GitHub and adds it for everyone.</p>` : `<p class="pub local">Only in your browser.</p>`;
+    if (t.mode === 'code' && t.route && t.route.length > 1) {
+      const verb = { start: 'Starts here', imports: 'imports', loads: 'loads', serves: 'serves' };
+      html += `<h3>Main route <small>from the entry file, following what it uses most</small></h3>
+        <button class="btn small" id="route-toggle">${townView.showRoute ? 'Hide route' : 'Show route on map'}</button>
+        <ol class="route">${t.route.map((st, i) => { const b = t.buildings[st.id]; const par = st.from != null ? basename(t.buildings[st.from].path) : ''; return `<li style="margin-left:${Math.min(st.depth, 4) * 12}px"><button class="link" data-step="${i}">${esc(basename(b.path))}</button> <span class="muted">${st.from == null ? verb.start : `${par} ${verb[st.how] || st.how} it`}</span>${st.libs.length ? `<br><em>uses ${st.libs.map(esc).join(', ')}</em>` : ''}${b.info && b.info.doc ? `<br><span class="muted small">${esc(b.info.doc.slice(0, 110))}${b.info.doc.length > 110 ? '…' : ''}</span>` : ''}</li>`; }).join('')}</ol>`;
+    }
     if (t.mode === 'code') {
-      html += `<h3>Streets <small>named for the file they carry, or where they lead; width = import traffic</small></h3><ul class="list">${t.streets.filter((st) => !st.empty).slice(0, 10).map((st) => `<li><span title="${esc((st.carries || []).map((c) => c.path).join(', '))}">${esc(st.name)}${(st.carries || []).length ? ` <em>${esc(st.carries.map((c) => basename(c.path)).join(', '))}</em>` : ''}</span><b>${st.traffic}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
+      html += `<h3>Streets <small>named for where they lead, or where they start when several meet at one square; width = import traffic</small></h3><ul class="list">${t.streets.filter((st) => !st.empty).slice(0, 10).map((st) => `<li><span title="${esc((st.carries || []).map((c) => c.path).join(', '))}">${esc(st.name)}${(st.carries || []).length ? ` <em>${esc(st.carries.map((c) => basename(c.path)).join(', '))}</em>` : ''}</span><b>${st.traffic}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
         <h3>Outside the walls <small>external libraries, nearest the district that uses them</small></h3><ul class="list">${t.clearings.map((c) => `<li><span>${esc(c.name)}${c.label ? ` <em>${esc(c.label)}</em>` : ''}${c.trail ? ' <em>build trail</em>' : ''}</span><b>${c.uses}</b></li>`).join('') || '<li class="muted">None.</li>'}</ul>`;
     } else {
       html += `<h3>Grid</h3><p class="muted">Rows are topics and columns are languages. Each house is one link: coral for video, green for a code repo, sand for an article.</p>
@@ -2264,7 +2395,7 @@ class WorldView {
     html += `<h3>History</h3><p class="muted">${t.rings} ring${t.rings === 1 ? '' : 's'} of growth (commits), ${t.visitors.length} visitor${t.visitors.length === 1 ? '' : 's'} (stars), ${t.cranes.length} crane${t.cranes.length === 1 ? '' : 's'} (open issues)${s.created ? `, founded ${esc(s.created.slice(0, 10))}` : ''}.</p>`;
     if (t.notes && t.notes.length) html += `<p class="note">${t.notes.map(esc).join('<br>')}</p>`;
     $('#summary').innerHTML = html;
-    $('#inspector').innerHTML = '<p class="muted">Hover or tap a building, district or clearing.</p>';
+    if (!townView.pinned) $('#inspector').innerHTML = '<p class="muted">Tap a building, district or clearing.</p>';
   }
   function renderInspector(hit, pinned) {
     const el = $('#inspector'); if (!hit) { el.innerHTML = '<p class="muted">Hover or tap a building, district or clearing.</p>'; return; }
@@ -2276,6 +2407,19 @@ class WorldView {
         const what = b.landmark ? `${b.landmark.label} (uses ${b.landmark.lib})` : b.special ? SPECIAL_LABEL[b.special] : KIND_LABEL[b.kind] || b.kind;
         h = `<h4>${esc(b.name)}</h4><p class="path">${esc(b.path)}</p><p><b>${esc(what)}</b></p>
           <dl class="stats small"><div><dt>Language</dt><dd>${esc(LANG_NAMES[b.lang] || b.lang || '–')}</dd></div><div><dt>${b.folder ? 'Files' : 'Lines'}</dt><dd>${fmt(b.folder ? b.files : b.lines)}</dd></div><div><dt>Imported by</dt><dd>${b.inDeg || 0}</dd></div><div><dt>Imports</dt><dd>${b.outDeg || 0}</dd></div></dl>`;
+        const info = b.info;
+        if (info && info.doc) h += `<p class="doc">${esc(info.doc)}</p>`;
+        const chips = (title, list, cls) => (list && list.length ? `<h5>${title} <small>${list.length}</small></h5><div class="chips ${cls || ''}">${list.map((x) => `<span>${esc(x)}</span>`).join('')}</div>` : '');
+        if (info) { h += chips(info.routes && info.routes.length ? 'Routes it serves' : '', info.routes, 'mono'); h += chips(b.lang === 'sql' ? 'Tables and views' : 'Classes', info.cls); h += chips(b.lang === 'sql' ? 'Functions, triggers and policies' : 'Functions', info.fns, 'mono'); if (info.main) h += `<p class="muted small">Runs on its own (has a main entry).</p>`; }
+        if (t && t._out) {
+          const names = (list) => (list || []).slice().sort((x, y) => y[1] - x[1]).slice(0, 12).map(([id, n]) => `<button class="link chip-link" data-bid="${id}">${esc(basename(t.buildings[id].path))}${n > 1 ? ` ×${n}` : ''}</button>`).join('');
+          const uses = t._out.get(b.id), usedBy = t._in.get(b.id);
+          const libs = (t.clearings || []).filter((c) => (c.users || []).includes(b.id)).map((c) => c.name);
+          if (uses && uses.length) h += `<h5>Uses</h5><div class="chips">${names(uses)}</div>`;
+          if (libs.length) h += `<h5>Outside libraries</h5><div class="chips">${libs.map((l) => `<span>${esc(l)}</span>`).join('')}</div>`;
+          if (usedBy && usedBy.length) h += `<h5>Used by</h5><div class="chips coral">${names(usedBy)}</div>`;
+          if ((!uses || !uses.length) && (!usedBy || !usedBy.length) && !b.folder && !['library', 'reading', 'plaque', 'fence', 'customs', 'warehouse', 'gallery'].includes(b.kind)) h += `<p class="muted small">No imports in or out were found for this file.</p>`;
+        }
         if (!b.folder && t) h += `<p><a href="https://github.com/${esc(t.key)}/blob/HEAD/${esc(b.path)}" target="_blank" rel="noopener">Open file on GitHub</a></p>`;
       }
     } else if (hit.type === 'district') {
@@ -2326,7 +2470,22 @@ class WorldView {
   $('#zin').onclick = () => (state.tab === 'town' ? townView : worldView).zoomBy(1.4);
   $('#zout').onclick = () => (state.tab === 'town' ? townView : worldView).zoomBy(1 / 1.4);
   $('#zfit').onclick = () => (state.tab === 'town' ? townView : worldView).fit();
+  // on phones the panel sits under the map; bring the map back into view after a jump
+  const showMap = () => { if (window.innerWidth <= 820) document.querySelector('.stage').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  const findBox = $('#find');
+  findBox.addEventListener('input', () => {
+    const t = state.current, q = findBox.value.trim().toLowerCase(), out = $('#find-results');
+    if (!t || t.mode !== 'code' || !q) { out.innerHTML = ''; return; }
+    const hits = t.buildings.map((b) => { const p = b.path.toLowerCase(), n = basename(p); const fn = b.info ? [...(b.info.fns || []), ...(b.info.cls || []), ...(b.info.routes || [])].find((x) => x.toLowerCase().includes(q)) : null; const score = n === q ? 0 : n.startsWith(q) ? 1 : n.includes(q) ? 2 : p.includes(q) ? 3 : fn ? 4 : 9; return { b, score, fn }; }).filter((x) => x.score < 9).sort((a, c) => a.score - c.score || a.b.path.length - c.b.path.length).slice(0, 8);
+    out.innerHTML = hits.length ? hits.map(({ b, fn, score }) => `<li><button class="link" data-bid="${b.id}">${esc(b.path)}</button>${score === 4 ? ` <span class="muted small">has ${esc(fn)}</span>` : ''}</li>`).join('') : '<li class="muted">No match in this town.</li>';
+  });
+  findBox.addEventListener('keydown', (e) => { if (e.key === 'Enter') { const first = $('#find-results [data-bid]'); if (first) first.click(); } });
   document.addEventListener('click', (e) => {
+    const bb = e.target.closest('[data-bid]');
+    if (bb && state.current) { const b = state.current.buildings[+bb.dataset.bid]; if (b) { townView.focusBuilding(b, 60); $('#find-results').innerHTML = ''; showMap(); } return; }
+    if (e.target.closest('#route-toggle')) { townView.showRoute = !townView.showRoute; townView.routeStep = null; if (townView.showRoute) { townView.pinned = null; townView.fit(); showMap(); } townView.draw(); renderSummary(state.current); return; }
+    const sb = e.target.closest('[data-step]');
+    if (sb && state.current) { const st = state.current.route[+sb.dataset.step]; townView.showRoute = true; townView.routeStep = +sb.dataset.step; townView.focusBuilding(state.current.buildings[st.id], 40); renderSummary(state.current); showMap(); return; }
     const b = e.target.closest('[data-go],[data-open],[data-nation],[data-town]'); if (!b) return;
     if (b.dataset.go === 'world') worldView.go({ kind: 'world' });
     else if (b.dataset.go) worldView.go({ kind: 'island', id: b.dataset.go.slice(7) });
