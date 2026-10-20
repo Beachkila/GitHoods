@@ -1933,7 +1933,7 @@ class WorldView {
       if (pts.has(e.pointerId)) pts.set(e.pointerId, [e.offsetX, e.offsetY]);
       if (pinch && pts.size === 2) { const [a, b] = [...pts.values()]; this.cam.z = Math.max(0.5, Math.min(300, pinch.z * Math.hypot(a[0] - b[0], a[1] - b[1]) / pinch.d)); moved = true; this.draw(); return; }
       if (drag && pts.size === 1) { const dx = e.offsetX - drag.x, dy = e.offsetY - drag.y; if (Math.abs(dx) + Math.abs(dy) > 4) moved = true; if (moved) { this.cam.x = drag.cx - dx / this.cam.z; this.cam.y = drag.cy - dy / this.cam.z; this.draw(); } return; }
-      const h = this._hit(e.offsetX, e.offsetY); if (JSON.stringify(h) !== JSON.stringify(this.hover)) { this.hover = h; this.draw(); this.app.onWorldHover(h); }
+      const h = this._hit(e.offsetX, e.offsetY); if (JSON.stringify(h) !== JSON.stringify(this.hover)) { this.hover = h; this.app.onWorldHover(h); if (this.level.kind !== 'world' || (h && h.kind === 'plot') || this._lastPlot) this.draw(); this._lastPlot = !!(h && h.kind === 'plot'); }
     });
     const up = (e) => { pts.delete(e.pointerId); if (pts.size < 2) pinch = null; if (drag && !moved && !pts.size) this._click(this._hit(e.offsetX, e.offsetY)); if (!pts.size) drag = null; };
     cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
@@ -1941,7 +1941,7 @@ class WorldView {
   }
   _hitIsland(i, x, y) {
     const dx = x - i.cx, dy = y - i.cy;
-    for (const p of i.repos.concat(i.forks)) if (Math.abs(dx - p.px) <= p.half && Math.abs(dy - p.py) <= p.half) return { kind: 'plot', login: p.owner, repo: p.r.name, island: i.id };
+    if (this._detailed(i)) for (const p of i.repos.concat(i.forks)) if (Math.abs(dx - p.px) <= p.half && Math.abs(dy - p.py) <= p.half) return { kind: 'plot', login: p.owner, repo: p.r.name, island: i.id };
     const th = Math.atan2(dy, dx), r = Math.hypot(dx, dy);
     if (r > i.coastAt(th) * 1.05) return null;
     let login = i.members[0];
@@ -1964,7 +1964,8 @@ class WorldView {
   zoomBy(k) { this.cam.z = Math.max(0.5, Math.min(300, this.cam.z * k)); this.draw(); }
 
   /* ---------- drawing ---------- */
-  draw() {
+  draw() { if (this._raf) return; this._raf = requestAnimationFrame(() => { this._raf = 0; this._draw(); }); }
+  _draw() {
     const ctx = this.ctx; if (!this.dpr || !this.owners) return;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     const W = this.cv.width / this.dpr, H = this.cv.height / this.dpr;
@@ -1972,13 +1973,38 @@ class WorldView {
     if (!this.islands.length) { this._t('No owners charted yet. Scan a repo to reveal its owner.', W / 2, H / 2, { size: 13 }); return; }
     if (this.level.kind === 'nation') return this._drawNation();
     const list = this.level.kind === 'island' ? this.islands.filter((i) => i.id === this.level.id) : this.islands;
-    for (const i of list) this._drawIsland(i);
+    for (const i of list) { if (!this._onScreen(i)) continue; if (this._detailed(i)) this._drawIsland(i); else this._drawIslandSimple(i); }
   }
   _t(s, x, y, o = {}) { const c = this.ctx; c.font = `${o.w || 400} ${o.size || 11}px system-ui, -apple-system, sans-serif`; c.textAlign = o.align || 'center'; c.textBaseline = 'middle'; c.lineWidth = 3; c.strokeStyle = o.halo || 'rgba(243,234,215,0.92)'; c.lineJoin = 'round'; c.strokeText(s, x, y); c.fillStyle = o.color || PAL.label; c.fillText(s, x, y); }
   _coastPath(i, k) {
     const c = this.ctx; c.beginPath();
     for (let j = 0; j < COAST_N; j++) { const th = -Math.PI / 2 + (j / COAST_N) * Math.PI * 2; const r = i.coast[j] * k; const [x, y] = this.S(i.cx + Math.cos(th) * r, i.cy + Math.sin(th) * r); j ? c.lineTo(x, y) : c.moveTo(x, y); }
     c.closePath();
+  }
+  _detailed(i) { return this.level.kind === 'island' || i.R0 * this.cam.z > 160; }
+  _onScreen(i) { const [x, y] = this.S(i.cx, i.cy), r = i.R * this.cam.z, W = this.cv.width / this.dpr, H = this.cv.height / this.dpr; return x + r > 0 && x - r < W && y + r > 0 && y - r < H; }
+  // world overview: coastline, land and height only (no plots, forks or visitors)
+  _drawIslandSimple(i) {
+    const c = this.ctx, z = this.cam.z;
+    if (!i._path) { // coastline in island units, built once and reused at any zoom
+      i._path = new Path2D(); i._shore = new Path2D();
+      for (let j = 0; j < COAST_N; j += 2) { const th = -Math.PI / 2 + (j / COAST_N) * Math.PI * 2; const r = i.coast[j]; const x = Math.cos(th) * r, y = Math.sin(th) * r; j ? i._path.lineTo(x, y) : i._path.moveTo(x, y); j ? i._shore.lineTo(x * 1.2, y * 1.2) : i._shore.moveTo(x * 1.2, y * 1.2); }
+      i._path.closePath(); i._shore.closePath();
+      // height: total stars on the island, shown as stacked contours inland
+      const stars = i.repos.reduce((a, x) => a + (x.r.stars || 0), 0) + i.forks.reduce((a, x) => a + (x.r.stars || 0), 0);
+      i._levels = Math.min(6, Math.ceil(Math.log10(1 + stars) * 1.6));
+    }
+    const [sx, sy] = this.S(i.cx, i.cy);
+    c.save(); c.translate(sx, sy); c.scale(z, z);
+    c.fillStyle = PAL.water; c.fill(i._shore);
+    c.fillStyle = '#EDE4CC'; c.fill(i._path); c.lineWidth = 1.4 / z; c.strokeStyle = PAL.inkSoft; c.stroke(i._path);
+    for (let k = 1; k <= i._levels; k++) { const f = 1 - k / (i._levels + 1.2); c.save(); c.scale(f, f); c.lineWidth = 1 / (z * f); c.strokeStyle = '#B89A68'; if (k === i._levels) { c.fillStyle = '#DCCBA2'; c.fill(i._path); } c.stroke(i._path); c.restore(); }
+    c.restore();
+    const screenR = i.R0 * z;
+    if (screenR < 18) return;
+    const name = i.members.length === 1 ? i.members[0] : i.members.length + ' owners';
+    this._t(name, sx, sy, { w: 700, size: Math.max(11, Math.min(16, screenR * 0.16)) });
+    if (screenR >= 34) { const [lx, ly] = this.S(i.cx, i.cy + i.R - 0.4); this._t(`${i.name} · ${i.repos.length + i.forks.length + i.forkMore} repos`, lx, ly, { color: PAL.labelSoft, size: 11 }); }
   }
   _drawIsland(i) {
     const c = this.ctx, z = this.cam.z;
