@@ -2680,11 +2680,15 @@ const hxNoise = (s) => (hashStr(s) % 997) / 997;
 // Muted, distinct fills. No deep blues; neighbours never share one.
 const HX_PALETTE = ['#C9B27A', '#A8BB9B', '#C99C86', '#CBA5AD', '#B6B98C', '#B4A9C4', '#9FBDB4', '#D9BC8C', '#BE8F9B', '#A6A877', '#BDB6A8', '#C4A98F'];
 
-function hexLayout(owners, towns) {
+function hexLayout(owners, towns, saved) {
   const firstSeen = {};
   for (const t of Object.values(towns || {})) { const f = t.firstBuilt || t.builtAt; const o = String(t.owner || '').toLowerCase(); if (f && (!firstSeen[o] || f < firstSeen[o])) firstSeen[o] = f; }
   const when = (l) => firstSeen[l.toLowerCase()] || owners[l].scannedAt || 9e15;
-  const logins = Object.keys(owners).filter((l) => owners[l].repos && owners[l].repos.length).sort((a, b) => when(a) - when(b) || a.localeCompare(b));
+  const sv = (saved && saved.hubs) || {};
+  // hubs already on the saved map keep their place and order; anyone new comes after, oldest first
+  const have = Object.keys(owners).filter((l) => owners[l].repos && owners[l].repos.length);
+  const savedOrder = ((saved && saved.order) || []).filter((l) => have.includes(l) && sv[l]);
+  const logins = [...savedOrder, ...have.filter((l) => !savedOrder.includes(l)).sort((a, b) => when(a) - when(b) || a.localeCompare(b))];
   const K = (a, b) => a + ',' + b;
   const sp = (a, b) => [HX_SQ3 * (a + b / 2), 1.5 * b]; // flower position in flower-lattice units, for measuring spread
   const land = new Map(); // 'a,b' -> owner index
@@ -2739,9 +2743,11 @@ function hexLayout(owners, towns) {
     return pen;
   };
 
-  logins.forEach((login, oi) => {
+  const kFor = (n0) => Math.max(Math.ceil(n0 / 7), Math.ceil((n0 * 1.25) / 7));
+  const commit = (oi, fl, dp) => { fl.forEach(([a, b]) => { land.set(K(a, b), oi); const [px, py] = sp(a, b); sX += px; sY += py; sQ += px * px + py * py; }); cnt += fl.length; perim += dp; flowersOf[oi] = fl; };
+  const placeNew = (login, oi) => {
     // a quarter of spare room is held back as open water, so a hub can take in new repos without nudging its neighbours
-    const n0 = owners[login].repos.length, k = Math.max(Math.ceil(n0 / 7), Math.ceil((n0 * 1.25) / 7));
+    const k = kFor(owners[login].repos.length);
     let cands;
     if (!land.size) cands = [[0, 0]];
     else {
@@ -2754,23 +2760,55 @@ function hexLayout(owners, towns) {
       const g = grow(c, k, login);
       let x = sX, y = sY, q = sQ; for (const [a, b] of g.region) { const [px, py] = sp(a, b); x += px; y += py; q += px * px + py * py; }
       const n = cnt + k, rg = Math.sqrt(Math.max(0, q / n - (x / n) ** 2 - (y / n) ** 2));
-      const s = (perim + g.dp) + 5 * rg + 2 * hxNoise(login + '@' + K(c[0], c[1])) + embrace(g.region, oi);
-      if (s < bs) { bs = s; best = g; }
+      const sc = (perim + g.dp) + 5 * rg + 2 * hxNoise(login + '@' + K(c[0], c[1])) + embrace(g.region, oi);
+      if (sc < bs) { bs = sc; best = g; }
     }
-    best.region.forEach(([a, b]) => { land.set(K(a, b), oi); const [px, py] = sp(a, b); sX += px; sY += py; sQ += px * px + py * py; });
-    cnt += k; perim += best.dp; flowersOf[oi] = best.region;
+    commit(oi, best.region, best.dp);
+  };
+  // 1. every saved hub goes back exactly where it was
+  logins.forEach((login, oi) => {
+    const s0 = sv[login]; if (!s0) return;
+    const fl = []; for (const [a, b] of s0.f) if (!land.has(K(a, b))) fl.push([a, b]);
+    commit(oi, fl, 0);
   });
+  // 2. a saved hub that has outgrown its flowers takes more beside its own land, in free water; nobody is moved
+  logins.forEach((login, oi) => {
+    const s0 = sv[login]; if (!s0) return; const n0 = owners[login].repos.length;
+    if (n0 <= flowersOf[oi].length * 7) return;
+    const want = kFor(n0);
+    while (flowersOf[oi].length < want) {
+      const mine = flowersOf[oi], mc = mine.reduce((p0, [a, b]) => { const [x, y] = sp(a, b); return [p0[0] + x / mine.length, p0[1] + y / mine.length]; }, [0, 0]);
+      // free water beside the hub's own land; a landlocked hub reaches out to the nearest open water instead of pushing neighbours
+      const set = new Map();
+      for (let reach = 3; reach <= 16 && !set.size; reach += 3) for (const [a, b] of mine) for (let da = -reach; da <= reach; da++) for (let db = -reach; db <= reach; db++) { const x = a + da, y = b + db, kk = K(x, y); if (hxDist(da, db) > reach || land.has(kk) || set.has(kk)) continue; set.set(kk, [x, y]); }
+      let pick = null, bs = 1e18;
+      for (const [x, y] of set.values()) {
+        let touch = 0; for (const [da, db] of HX_DIRS) if (land.get(K(x + da, y + db)) === oi) touch++;
+        const [px, py] = sp(x, y), d = Math.hypot(px - mc[0], py - mc[1]);
+        const sc = (touch ? 0 : 40) + d * 1.2 - touch * 1.5 + 1.2 * hxNoise(login + ':+' + K(x, y)) + embrace([...mine, [x, y]], oi);
+        if (sc < bs) { bs = sc; pick = [x, y]; }
+      }
+      if (!pick) break;
+      land.set(K(pick[0], pick[1]), oi); mine.push(pick); const [px, py] = sp(pick[0], pick[1]); sX += px; sY += py; sQ += px * px + py * py; cnt++;
+    }
+  });
+  // 3. new hubs: the same coastal placement as before, after everything that is already charted
+  logins.forEach((login, oi) => { if (!sv[login]) placeNew(login, oi); });
 
   // hexes: the owner's repos in creation order fill its flowers in the order they were laid down
   const cells = new Map(); const terr = [];
   let gx = 0, gy = 0, gn = 0; flowersOf.forEach((fl) => fl.forEach(([a, b]) => { const [q, r] = hxSuperToFine(a, b); const [x, y] = hxPx(q, r); gx += x; gy += y; gn++; }));
   gx /= gn || 1; gy /= gn || 1;
+  const world = { v: 1, order: logins.slice(), hubs: {} };
   logins.forEach((login, oi) => {
     const o = owners[login];
     const repos = o.repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0) || a.name.localeCompare(b.name));
     const fl = flowersOf[oi]; const mine = [];
     const fp = fl.map(([a, b]) => { const [q, r] = hxSuperToFine(a, b); return [q, r, ...hxPx(q, r)]; });
+    // where partial flowers lean toward is fixed the first time a hub is charted, so its repos never shuffle
     let tx = gx, ty = gy; if (fp.length > 1) { tx = fp.reduce((s, f) => s + f[2], 0) / fp.length; ty = fp.reduce((s, f) => s + f[3], 0) / fp.length; }
+    if (sv[login] && sv[login].t) { tx = sv[login].t[0]; ty = sv[login].t[1]; }
+    world.hubs[login] = { f: fl.map(([a, b]) => [a, b]), t: [+tx.toFixed(3), +ty.toFixed(3)] };
     fp.forEach(([q, r, cx, cy], fi) => {
       const need = Math.min(7, repos.length - fi * 7); if (need <= 0) return;
       let ring = HX_DIRS.slice();
@@ -2784,11 +2822,11 @@ function hexLayout(owners, towns) {
     });
     terr.push({ login, oi, cells: mine, flowers: fl.length, count: repos.length });
   });
-  return { logins, cells, terr };
+  return { logins, cells, terr, world };
 }
 
-/* ---------- the library island: shared libraries get their own organic clusters of hexes, offshore ---------- */
-function libLayout(towns, bounds) {
+/* ---------- the library island: shared libraries get their own organic landmass just off the coast ---------- */
+function libLayout(towns, bounds, landCells) {
   const use = new Map();
   for (const [key, t] of Object.entries(towns)) for (const c of t.clearings || []) {
     const nm = String(c.name || ''); if (nm.length < 2 || !/^[@\w]/.test(nm) || /[()\s]{2}/.test(nm)) continue; const k = nm.toLowerCase();
@@ -2798,20 +2836,39 @@ function libLayout(towns, bounds) {
   const libs = [...use.values()].filter((e) => e.hoods.size >= 2).sort((a, b) => a.first - b.first || (a.key < b.key ? -1 : 1))
     .map((e) => ({ name: e.name, key: e.key, n: e.hoods.size, hoods: [...e.hoods], k: Math.max(1, Math.min(7, Math.round(Math.log2(e.hoods.size) * 1.4))), cells: [] }));
   const cells = new Map(); if (!libs.length) return { libs, cells, byKey: new Map() };
-  const total = libs.reduce((a, l) => a + l.k, 0), Ri = Math.sqrt(total) * 1.7 + 2;
-  const cx = bounds[2] + 7 + Ri * 1.75, cy = (bounds[1] + bounds[3]) / 2 + (bounds[3] - bounds[1]) * 0.22;
-  const r0 = Math.round(cy / 1.5), q0 = Math.round(cx / HX_SQ3 - r0 / 2), [ix, iy] = hxPx(q0, r0);
+  // height follows how many hoods lean on the library (log scale, so one giant does not flatten the rest)
+  const nMax = Math.max(...libs.map((l) => l.n)), l2 = Math.log(2), span = Math.log(nMax) - l2 || 1;
+  libs.forEach((L) => { L.h = 0.22 + 1.3 * (Math.log(L.n) - l2) / span; });
+  // which way do the users lie? the island sits on that side of the land, a couple of water hexes off the coast
+  const land = landCells ? [...landCells.values()] : [], byKey = new Map(); for (const c of land) byKey.set((c.login + '/' + c.repo.name).toLowerCase(), c);
+  let lx = (bounds[0] + bounds[2]) / 2, ly = (bounds[1] + bounds[3]) / 2;
+  if (land.length) { lx = land.reduce((a, c) => a + c.x, 0) / land.length; ly = land.reduce((a, c) => a + c.y, 0) / land.length; }
+  let ux = 0, uy = 0, un = 0; for (const L of libs) for (const h of L.hoods) { const c = byKey.get(h); if (c) { ux += c.x; uy += c.y; un++; } }
+  let dx = un ? ux / un - lx : 1, dy = un ? uy / un - ly : 0; const dl = Math.hypot(dx, dy); if (dl < 1.5) { dx = 1; dy = 0.25; } else { dx /= dl; dy /= dl; }
+  const total = libs.reduce((a, l) => a + l.k, 0), Ri = 0.95 * Math.sqrt(total) + 1.2;
+  let t = 0, px = lx, py = ly;
+  for (; t < 300; t += 0.5) { px = lx + dx * t; py = ly + dy * t; let m = 1e9; for (const c of land) { const d = Math.hypot(c.x - px, c.y - py); if (d < m) m = d; } if (m >= Ri + 2.6) break; }
+  const r0 = Math.round(py / 1.5), q0 = Math.round(px / HX_SQ3 - r0 / 2), [ix, iy] = hxPx(q0, r0);
   const free = (q, r) => !cells.has(q + ',' + r);
-  const pxd = (q, r, x, y) => { const [px, py] = hxPx(q, r); return Math.hypot(px - x, py - y); };
+  const nb = (q, r) => HX_DIRS.filter(([a, b]) => cells.has((q + a) + ',' + (r + b))).length;
+  const pxd = (q, r, x, y) => { const [x1, y1] = hxPx(q, r); return Math.hypot(x1 - x, y1 - y); };
   libs.forEach((L, li) => {
     let seed = [q0, r0];
-    if (li) { let best = null, bs = 1e9; for (const c of cells.values()) for (const [dq, dr] of HX_DIRS) { const q = c.q + dq, r = c.r + dr; if (!free(q, r)) continue; const sc = pxd(q, r, ix, iy) + 2.2 * hxNoise(L.key + q + ',' + r); if (sc < bs) { bs = sc; best = [q, r]; } } seed = best; }
+    if (li) {
+      // small libraries sometimes sit a water hex apart as islets; the rest hug the main body
+      const apart = L.k <= 2 && hxNoise(L.key + '!') < 0.4; let best = null, bs = 1e9;
+      const ring = new Set(); for (const c of cells.values()) for (const [a, b] of HX_DIRS) { const q = c.q + a, r = c.r + b; if (free(q, r)) ring.add(q + ',' + r); }
+      const cand = new Map();
+      if (apart) { for (const k2 of ring) { const [q, r] = k2.split(',').map(Number); for (const [a, b] of HX_DIRS) { const q2 = q + a, r2 = r + b; if (free(q2, r2) && !ring.has(q2 + ',' + r2)) cand.set(q2 + ',' + r2, [q2, r2]); } } } else for (const k2 of ring) cand.set(k2, k2.split(',').map(Number));
+      for (const [q, r] of cand.values()) { const sc = pxd(q, r, ix, iy) * (apart ? 0.9 : 1) + 2.8 * hxNoise(L.key + q + ',' + r) - (apart ? 0 : 0.5 * nb(q, r)); if (sc < bs) { bs = sc; best = [q, r]; } }
+      seed = best || seed;
+    }
     const add = (q, r) => { const [x, y] = hxPx(q, r); const c = { q, r, x, y, li }; cells.set(q + ',' + r, c); L.cells.push(c); };
     add(seed[0], seed[1]);
     const [sx, sy] = hxPx(seed[0], seed[1]);
     while (L.cells.length < L.k) {
       let best = null, bs = 1e9;
-      for (const c of L.cells) for (const [dq, dr] of HX_DIRS) { const q = c.q + dq, r = c.r + dr; if (!free(q, r)) continue; const sc = pxd(q, r, sx, sy) + 1.6 * hxNoise(L.key + ':' + q + ',' + r); if (sc < bs) { bs = sc; best = [q, r]; } }
+      for (const c of L.cells) for (const [a, b] of HX_DIRS) { const q = c.q + a, r = c.r + b; if (!free(q, r)) continue; const sc = pxd(q, r, sx, sy) + 1.9 * hxNoise(L.key + ':' + q + ',' + r) - 0.2 * nb(q, r); if (sc < bs) { bs = sc; best = [q, r]; } }
       if (!best) break; add(best[0], best[1]);
     }
     L.cx = L.cells.reduce((a, c) => a + c.x, 0) / L.cells.length; L.cy = L.cells.reduce((a, c) => a + c.y, 0) / L.cells.length;
@@ -2830,9 +2887,9 @@ class HexWorld {
   }
 
   /* ----- data ----- */
-  setData(owners, towns) {
-    this.owners = owners; this.towns = towns; this.links = worldLinks(owners, towns);
-    const sig = Object.keys(owners).sort().map((l) => l + ':' + owners[l].repos.length).join('|');
+  setData(owners, towns, world) {
+    this.owners = owners; this.towns = towns; this.saved = world || null; this.links = worldLinks(owners, towns);
+    const sig = Object.keys(owners).sort().map((l) => l + ':' + owners[l].repos.length).join('|') + (world ? '#w' : '');
     if (sig !== this.sig) { this.sig = sig; this._layout(); }
     const lsig = Object.values(towns).reduce((a, t) => a + (t.clearings || []).length, 0) + ':' + Object.keys(towns).length;
     if (lsig !== this._lsig || !this.isl) { this._lsig = lsig; this._island(); }
@@ -2841,7 +2898,7 @@ class HexWorld {
     this.fit();
   }
   _island() {
-    const I = libLayout(this.towns, this._landBounds); this.isl = I;
+    const I = libLayout(this.towns, this._landBounds, this.cells); this.isl = I;
     const mk = () => new Path2D(), hexAt = (p, x, y) => { HX_CORNERS.forEach(([cx, cy], i) => (i ? p.lineTo(x + cx, y + cy) : p.moveTo(x + cx, y + cy))); p.closePath(); };
     const edgeAt = (p, x, y, d) => { const a = HX_CORNERS[d], b = HX_CORNERS[(d + 1) % 6]; p.moveTo(x + a[0], y + a[1]); p.lineTo(x + b[0], y + b[1]); };
     I.P = { fill: I.libs.map(mk), grid: mk(), border: mk(), coast: mk() };
@@ -2853,7 +2910,7 @@ class HexWorld {
     this.bounds = [x0, y0, x1, y1];
   }
   _layout() {
-    const L = hexLayout(this.owners, this.towns); this.lay = L; this.cells = L.cells;
+    const L = hexLayout(this.owners, this.towns, this.saved); this.lay = L; this.cells = L.cells;
     const terr = L.terr; this.terr = terr; this.byLogin = new Map(terr.map((t) => [t.login, t]));
     const mk = () => new Path2D();
     const P = { fill: terr.map(mk), grid: mk(), seam: mk(), border: mk(), coast: mk(), outline: terr.map(mk), water: mk() };
@@ -2880,6 +2937,9 @@ class HexWorld {
       for (const c of ring) for (const [dq, dr] of HX_DIRS) { const q = c.q + dq, r = c.r + dr, k = q + ',' + r; if (seen.has(k)) continue; seen.add(k); const [x, y] = hxPx(q, r); hexAt(P.water, x, y); next.push({ q, r }); }
       ring = next;
     }
+    // pillar height: stars on a log scale; no stars, flat ground
+    let sMax = 0; for (const c of this.cells.values()) sMax = Math.max(sMax, c.repo.stars || 0);
+    for (const c of this.cells.values()) { const st = c.repo.stars || 0; c.h = st > 0 && sMax > 0 ? 0.16 + 1.34 * Math.log1p(st) / Math.log1p(sMax) : 0; }
     this.P = P; this.bounds = [x0, y0, x1, y1]; this._landBounds = this.bounds; this._lsig = null; this.adj = adj;
     // colours: greedy over the border graph, least-used first
     const used = new Array(HX_PALETTE.length).fill(0); this.colors = [];
@@ -2982,12 +3042,19 @@ class HexWorld {
     return [q, r];
   }
   _cellAt(wx, wy) { const [q, r] = this._hexOf(wx, wy); return this.cells.get(q + ',' + r) || null; }
+  // a raised hex is hit where it is drawn: its lifted top, not the ground under it
+  _pickIn(map, wx, wy, hOf) {
+    let best = null; const f = this._hf(this.cam.z);
+    for (let k = 0; k <= 9; k++) { const up = k * 0.18, [q, r] = this._hexOf(wx, wy + up), c = map.get(q + ',' + r); if (!c) continue; const e = hOf(c) * f; if (!e || e < up - 0.1) continue; const [q2, r2] = this._hexOf(wx, wy + e); if (q2 === c.q && r2 === c.r && (!best || c.y > best.y)) best = c; }
+    if (best) return best;
+    const [q, r] = this._hexOf(wx, wy); return map.get(q + ',' + r) || null;
+  }
   _hit(sx, sy) {
     if (!this.cells) return null;
     const [x, y] = this.U(sx, sy);
-    if (!this.hubOnly && this.isl && this.isl.cells.size) { const [q, r] = this._hexOf(x, y), ic = this.isl.cells.get(q + ',' + r); if (ic) { const L = this.isl.libs[ic.li]; return { kind: 'lib', key: L.key, name: L.name, n: L.n }; } }
-    const c = this._cellAt(x, y); if (!c) return null;
-    if (this.cam.z >= 8) return { kind: 'plot', login: c.login, repo: c.repo.name, n: c.ri + 1, q: c.q, r: c.r };
+    if (!this.hubOnly && this.isl && this.isl.cells.size) { const ic = this._pickIn(this.isl.cells, x, y, (c) => this.isl.libs[c.li].h); if (ic) { const L = this.isl.libs[ic.li]; return { kind: 'lib', key: L.key, name: L.name, n: L.n }; } }
+    const c = this._pickIn(this.cells, x, y, (q) => q.h || 0); if (!c) return null;
+    if (this.cam.z >= 8) return { kind: 'plot', login: c.login, repo: c.repo.name, n: c.ri + 1, q: c.q, r: c.r, stars: c.repo.stars || 0 };
     return { kind: 'nation', login: c.login };
   }
   _click(h) {
@@ -3042,19 +3109,46 @@ class HexWorld {
       ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = lw(5.5); ctx.stroke(P.outline[t.oi]);
       ctx.strokeStyle = this.colors[t.oi].ink; ctx.lineWidth = lw(2.4); ctx.stroke(P.outline[t.oi]);
     }
-    if (!only && this.isl && this.isl.libs.length) this._drawIsland(ctx, z, lw);
+    this._pillars(ctx, W, H, z, lw, only, focusLogin);
+    if (!only && this.isl && this.isl.libs.length) this._drawIsland(ctx, W, H, z, lw);
     ctx.restore();
     // per-hex detail for what is on screen
     if (z >= 6) this._detail(W, H, z, only ? focusLogin : null);
     if (z < 36) this._labels(W, H, z, only ? focusLogin : null);
     if (!only) this._libLabels(W, H, z);
   }
-  _drawIsland(ctx, z, lw) {
+  // a raised hexagon: two south-facing walls under a top that is lifted by h (world units)
+  _pillar(ctx, x, y, h, top, wallE, wallW, line, lw) {
+    const C = HX_CORNERS, P = (k, up) => [x + C[k][0], y + C[k][1] - (up ? h : 0)];
+    const quad = (a, b, col) => { const A = P(a, 0), B = P(b, 0), A2 = P(a, 1), B2 = P(b, 1); ctx.beginPath(); ctx.moveTo(A[0], A[1]); ctx.lineTo(B[0], B[1]); ctx.lineTo(B2[0], B2[1]); ctx.lineTo(A2[0], A2[1]); ctx.closePath(); ctx.fillStyle = col; ctx.fill(); ctx.lineWidth = lw(0.8); ctx.strokeStyle = line; ctx.stroke(); };
+    quad(1, 2, wallE); quad(2, 3, wallW);
+    ctx.beginPath(); C.forEach((_, k) => { const q = P(k, 1); if (k) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.closePath(); ctx.fillStyle = top; ctx.fill(); ctx.lineWidth = lw(1); ctx.strokeStyle = line; ctx.stroke();
+  }
+  _hf(z) { return Math.max(0.4, Math.min(1.3, 1.35 - z / 45)); }
+  _pillars(ctx, W, H, z, lw, only, focusLogin) {
+    const f = this._hf(z), [ux0, uy0] = this.U(-60, -60), [ux1, uy1] = this.U(W + 60, H + 60), list = [];
+    for (const c of this.cells.values()) {
+      if (!c.h || c.x < ux0 - 2 || c.x > ux1 + 2 || c.y < uy0 - 1 || c.y > uy1 + 3) continue;
+      if (only && c.login !== only) continue; if (this.lang && c.repo.lang !== this.lang) continue;
+      if (focusLogin && !only && c.login !== focusLogin) continue;
+      list.push(c);
+    }
+    list.sort((a, b) => a.y - b.y);
+    for (const c of list) {
+      const col = this.colors[c.oi], built = !!this.towns[(c.login + '/' + c.repo.name).toLowerCase()];
+      this._pillar(ctx, c.x, c.y, c.h * f, shade(built ? col.built : col.base, 1.08), shade(col.base, 0.8), shade(col.base, 0.68), 'rgba(74,62,48,0.55)', lw);
+    }
+  }
+  _drawIsland(ctx, W, H, z, lw) {
     const I = this.isl, GOLD = ['#E6CC7F', '#DDBE62', '#EBD596'];
     I.libs.forEach((L, i) => { ctx.fillStyle = GOLD[i % 3]; ctx.fill(I.P.fill[i]); });
     if (z >= 5) { ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = lw(1); ctx.stroke(I.P.grid); }
-    ctx.strokeStyle = 'rgba(255,253,246,0.95)'; ctx.lineWidth = lw(4); ctx.stroke(I.P.border); ctx.strokeStyle = 'rgba(122,94,30,0.8)'; ctx.lineWidth = lw(1.4); ctx.stroke(I.P.border);
     ctx.strokeStyle = 'rgba(122,94,30,0.6)'; ctx.lineWidth = lw(1); ctx.stroke(I.P.coast);
+    // raised hexes: the more hoods use a library, the taller it stands
+    const f = this._hf(z), [ux0, uy0] = this.U(-60, -60), [ux1, uy1] = this.U(W + 60, H + 60), list = [];
+    for (const c of I.cells.values()) if (c.x > ux0 - 2 && c.x < ux1 + 2 && c.y > uy0 - 1 && c.y < uy1 + 3) list.push(c);
+    list.sort((a, b) => a.y - b.y);
+    for (const c of list) { const L = I.libs[c.li], base = GOLD[c.li % 3]; this._pillar(ctx, c.x, c.y, L.h * f, shade(base, 1.04), shade(base, 0.78), shade(base, 0.64), 'rgba(122,94,30,0.7)', lw); }
     // selected library: its users are ringed; a hood in view: dashed links across the water to the libraries it calls
     const hex = (c) => { ctx.beginPath(); HX_CORNERS.forEach(([cx, cy], k) => (k ? ctx.lineTo(c.x + cx, c.y + cy) : ctx.moveTo(c.x + cx, c.y + cy))); ctx.closePath(); };
     if (this.libSel) { const L = I.byKey.get(this.libSel); if (L) { ctx.strokeStyle = '#C0432C'; ctx.lineWidth = lw(3); for (const c of L.cells) { hex(c); ctx.stroke(); } this._keyCells(); for (const k of L.hoods) { const c = this._byKey.get(k); if (c) { hex(c); ctx.lineWidth = lw(2.4); ctx.stroke(); } } } }
@@ -3082,12 +3176,12 @@ class HexWorld {
     const [tx, ty] = this.S(mid, top); if (z < 14) this._t('Libraries', tx, ty, { w: 700, size: 12, color: '#7A5E1E', halo: 'rgba(235,240,236,0.85)' });
   }
   _detail(W, H, z, only) {
-    const ctx = this.ctx; const wantTown = z >= 28; const names = z >= 32;
+    const ctx = this.ctx; const wantTown = z >= 28; const names = z >= 20; const hf = this._hf(z);
     const [ux0, uy0] = this.U(-60, -60), [ux1, uy1] = this.U(W + 60, H + 60);
     for (const c of this.cells.values()) {
       if (c.x < ux0 || c.x > ux1 || c.y < uy0 || c.y > uy1) continue;
       const key = (c.login + '/' + c.repo.name).toLowerCase(); const t = this.towns[key];
-      const [sx, sy] = this.S(c.x, c.y);
+      const [sx, sy0] = this.S(c.x, c.y); const sy = sy0 - (c.h || 0) * hf * z;
       if (only && c.login !== only) continue;
       if (this.lang && c.repo.lang !== this.lang) continue;
       if (t) {
@@ -3097,14 +3191,14 @@ class HexWorld {
         } else { ctx.beginPath(); ctx.arc(sx, sy, Math.max(2.2, z * 0.3), 0, 7); ctx.fillStyle = langColor(t.domLang || 'other'); ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = PAL.ink; ctx.stroke(); }
       } else if (z >= 14 && !names) { ctx.beginPath(); ctx.arc(sx, sy, Math.max(1.5, z * 0.1), 0, 7); ctx.fillStyle = 'rgba(255,255,255,0.65)'; ctx.fill(); }
       if (names) {
-        let nm = c.repo.name; const maxw = z * 1.55; ctx.font = `500 ${Math.min(12, z * 0.3)}px system-ui, sans-serif`;
+        let nm = c.repo.name; const maxw = z * 1.6, fs = Math.max(8, Math.min(12, z * 0.3)); ctx.font = `500 ${fs}px system-ui, sans-serif`;
         while (nm.length > 3 && ctx.measureText(nm).width > maxw) nm = nm.slice(0, -2);
         if (nm !== c.repo.name) nm += '…';
-        this._t(nm, sx, sy + (t ? z * 0.66 : 0), { size: Math.min(12, z * 0.3), w: 500, halo: 'rgba(250,246,236,0.9)' });
+        this._t(nm, sx, sy + (t ? z * 0.66 : 0), { size: fs, w: 500, halo: 'rgba(250,246,236,0.9)' });
       }
     }
     // hovered or searched hex
-    const mark = (q, r, col, w) => { const [x, y] = hxPx(q, r); const [sx, sy] = this.S(x, y); ctx.beginPath(); HX_CORNERS.forEach(([cx, cy], i) => (i ? ctx.lineTo(sx + cx * z, sy + cy * z) : ctx.moveTo(sx + cx * z, sy + cy * z))); ctx.closePath(); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke(); };
+    const mark = (q, r, col, w) => { const [x, y] = hxPx(q, r); const cc = this.cells.get(q + ',' + r); const [sx, sy0] = this.S(x, y); const sy = sy0 - (cc && cc.h ? cc.h * hf * z : 0); ctx.beginPath(); HX_CORNERS.forEach(([cx, cy], i) => (i ? ctx.lineTo(sx + cx * z, sy + cy * z) : ctx.moveTo(sx + cx * z, sy + cy * z))); ctx.closePath(); ctx.strokeStyle = col; ctx.lineWidth = w; ctx.stroke(); };
     if (this.focus) { const [q, r] = this.focus.split(',').map(Number); mark(q, r, PAL.coral, 3); }
     if (this.hover && this.hover.kind === 'plot') mark(this.hover.q, this.hover.r, PAL.coral, 2.2);
   }
@@ -3129,21 +3223,27 @@ class HexWorld {
     }
     c.restore();
   }
+  // every hub is named at every zoom. Big territories get big names; small ones get small names tucked beside them,
+  // with a hairline back to the land when they had to move off it
   _labels(W, H, z, only) {
-    const ctx = this.ctx; const taken = [];
-    const order = this.terr.slice().sort((a, b) => b.cells.length - a.cells.length);
+    const ctx = this.ctx; const taken = []; const hov = this.hover && this.hover.login;
+    const order = this.terr.slice().sort((a, b) => b.cells.length - a.cells.length || (a.login < b.login ? -1 : 1));
+    const hit = (bx, list) => list.reduce((o, q) => { const ox = Math.min(bx[2], q[2]) - Math.max(bx[0], q[0]), oy = Math.min(bx[3], q[3]) - Math.max(bx[1], q[1]); return ox > 0 && oy > 0 ? o + ox * oy : o; }, 0);
     for (const t of order) {
       if (only && t.login !== only) continue;
       const [sx, sy] = this.S(t.ax, t.ay); if (sx < -80 || sx > W + 80 || sy < -40 || sy > H + 40) continue;
-      const roomPx = t.diam * z;
-      let size = Math.max(11, Math.min(22, roomPx * 0.11)); ctx.font = `700 ${size}px system-ui, sans-serif`;
-      const tw = ctx.measureText(t.login).width; if (tw > roomPx * 0.95 && !(this.hover && this.hover.login === t.login)) continue;
-      const two = roomPx > 120 && size >= 12;
-      const box = [sx - tw / 2 - 3, sy - size / 2 - 2, sx + tw / 2 + 3, sy + size / 2 + (two ? size + 2 : 2)];
-      if (taken.some((b) => box[0] < b[2] && b[0] < box[2] && box[1] < b[3] && b[1] < box[3])) continue;
-      taken.push(box);
-      this._t(t.login, sx, sy, { w: 700, size, color: '#3B2A1A', halo: 'rgba(250,246,236,0.78)' });
-      if (two) this._t(`${t.count} repos`, sx, sy + size + 1, { size: 10.5, color: '#5E4B38', halo: 'rgba(250,246,236,0.7)' });
+      const roomPx = t.diam * z, size = Math.max(8.5, Math.min(22, roomPx * 0.11)); ctx.font = `700 ${size}px system-ui, sans-serif`;
+      const tw = ctx.measureText(t.login).width, two = roomPx > 120 && size >= 12, hh = size / 2 + 2;
+      const spots = [[0, 0], [0, -size * 1.15], [0, size * 1.15], [tw * 0.6, 0], [-tw * 0.6, 0], [tw * 0.55, -size * 1.1], [-tw * 0.55, -size * 1.1], [tw * 0.55, size * 1.1], [-tw * 0.55, size * 1.1], [0, -size * 2.3], [0, size * 2.3], [tw * 0.8, -size * 2.2], [-tw * 0.8, -size * 2.2]];
+      let best = null, bo = Infinity;
+      for (const [dx, dy] of spots) {
+        const box = [sx + dx - tw / 2 - 3, sy + dy - hh, sx + dx + tw / 2 + 3, sy + dy + hh + (two && !dx && !dy ? size + 2 : 0)], o = hit(box, taken);
+        if (o < bo) { bo = o; best = [dx, dy, box]; } if (!o) break;
+      }
+      const [dx, dy, box] = best; taken.push(box);
+      if (dx || dy) { ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(sx + dx, sy + dy); ctx.lineWidth = 0.8; ctx.strokeStyle = 'rgba(59,42,26,0.45)'; ctx.stroke(); ctx.beginPath(); ctx.arc(sx, sy, 1.6, 0, 7); ctx.fillStyle = 'rgba(59,42,26,0.7)'; ctx.fill(); }
+      this._t(t.login, sx + dx, sy + dy, { w: 700, size, color: '#3B2A1A', halo: 'rgba(250,246,236,0.82)' });
+      if (two && !dx && !dy) this._t(`${t.count} repos`, sx, sy + size + 1, { size: 10.5, color: '#5E4B38', halo: 'rgba(250,246,236,0.7)' });
     }
   }
 }
@@ -3176,7 +3276,7 @@ class HexWorld {
     if (location.protocol === 'file:') return;
     let ix;
     try { const r = await fetch('towns/index.json', { cache: 'no-cache' }); if (!r.ok) return; ix = await r.json(); } catch (e) { return; }
-    state.publicIndex = ix;
+    state.publicIndex = ix; if (ix.world) state.world = ix.world;
     for (const o of Object.values(ix.owners || {})) { const cur = state.owners[o.login]; if (!cur || (o.scannedAt || 0) >= (cur.scannedAt || 0)) state.owners[o.login] = o; }
     for (const [k, e] of Object.entries(ix.towns || {})) {
       const cur = state.towns[k];
@@ -3195,6 +3295,7 @@ class HexWorld {
   function load() {
     const seed = window.GH_SEED || { owners: {}, towns: {} };
     for (const o of Object.values(seed.owners)) state.owners[o.login] = o;
+    if (seed.world) state.world = seed.world;
     for (const t of Object.values(seed.towns)) putTown(t);
     try { const c = JSON.parse(localStorage.getItem(STORE) || 'null'); if (c) { Object.assign(state.owners, c.owners || {}); for (const t of Object.values(c.towns || {})) putTown(t); } } catch (e) { /* storage unavailable */ }
   }
@@ -3250,7 +3351,7 @@ class HexWorld {
     $('#tab-hub').disabled = !(state.hub && state.owners[state.hub]);
     if (tab === 'world' || tab === 'hub') {
       worldView.markKey = state.current ? String(state.current.key).toLowerCase() : null; worldView.hubOnly = tab === 'hub'; worldView.outline = tab === 'world' ? state.hub || null : null;
-      worldView.resize(); worldView.setData(state.owners, state.towns); fillLangs();
+      worldView.resize(); worldView.setData(state.owners, state.towns, state.world); fillLangs();
       const L = worldView.level;
       if (tab === 'hub') { if (!(L.kind === 'nation' && L.login === state.hub)) worldView.go({ kind: 'nation', login: state.hub }); }
       else if (L.kind !== 'world') worldView.go({ kind: 'world' });
@@ -3472,7 +3573,7 @@ class HexWorld {
     if (hh.kind === 'lib') { el.innerHTML = `<h4>${esc(hh.name)}</h4><p>Library · used by ${hh.n} hoods. Tap to see them.</p>`; return; }
     if (hh.kind === 'plot') { const o = state.owners[hh.login]; const r = o.repos.find((x) => x.name === hh.repo); const t = state.towns[(hh.login + '/' + hh.repo).toLowerCase()];
       const n = hh.n || (o.repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0)).indexOf(r) + 1);
-      el.innerHTML = `<h4>${esc(hh.repo)}</h4><p>${esc(hh.login)} · plot #${n}${r.created ? ' · granted ' + esc(r.created.slice(0, 10)) : ''}</p><p>${t ? `<b>${esc(t.archetype.name)}</b>` : r.size === 0 ? 'Empty plot' : 'Fogged. Tap to scan and build.'}</p>${r.lang ? `<p class="muted">${esc(r.lang)}${r.stars ? ' · ' + fmt(r.stars) + ' stars' : ''}</p>` : ''}`; }
+      el.innerHTML = `<h4>${esc(hh.repo)}</h4><p>${esc(hh.login)} · plot #${n}${r.created ? ' · granted ' + esc(r.created.slice(0, 10)) : ''}${r.stars ? ' · ' + r.stars.toLocaleString() + ' stars' : ''}</p><p>${t ? `<b>${esc(t.archetype.name)}</b>` : r.size === 0 ? 'Empty plot' : 'Fogged. Tap to scan and build.'}</p>${r.lang ? `<p class="muted">${esc(r.lang)}${r.stars ? ' · ' + fmt(r.stars) + ' stars' : ''}</p>` : ''}`; }
     else { const login = hh.login; const o = login && state.owners[login]; el.innerHTML = o ? `<h4>${esc(login)}</h4><p>${o.type === 'Organization' ? 'Organization' : 'User'} · ${o.repos.length} plots</p>` : ''; }
   }
 
