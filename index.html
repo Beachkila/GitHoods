@@ -2684,7 +2684,7 @@ function hexLayout(owners, towns, saved) {
   const firstSeen = {};
   for (const t of Object.values(towns || {})) { const f = t.firstBuilt || t.builtAt; const o = String(t.owner || '').toLowerCase(); if (f && (!firstSeen[o] || f < firstSeen[o])) firstSeen[o] = f; }
   const when = (l) => firstSeen[l.toLowerCase()] || owners[l].scannedAt || 9e15;
-  const sv = (saved && saved.hubs) || {};
+  const sv = Object.assign({}, (saved && saved.hubs) || {});
   // hubs already on the saved map keep their place and order; anyone new comes after, oldest first
   const have = Object.keys(owners).filter((l) => owners[l].repos && owners[l].repos.length);
   const savedOrder = ((saved && saved.order) || []).filter((l) => have.includes(l) && sv[l]);
@@ -2708,6 +2708,7 @@ function hexLayout(owners, towns, saved) {
         const s = hxDist(x - seed[0], y - seed[1]) + 1.5 * hxNoise(login + ':' + kk) - 0.3 * hug;
         if (s < bs) { bs = s; best = [x, y]; }
       }
+      if (!best) return null;
       dp += 6 - 2 * touch(best[0], best[1]); inR.add(K(best[0], best[1])); region.push(best);
     }
     return { region, dp };
@@ -2745,7 +2746,7 @@ function hexLayout(owners, towns, saved) {
 
   const kFor = (n0) => Math.max(Math.ceil(n0 / 7), Math.ceil((n0 * 1.25) / 7));
   const commit = (oi, fl, dp) => { fl.forEach(([a, b]) => { land.set(K(a, b), oi); const [px, py] = sp(a, b); sX += px; sY += py; sQ += px * px + py * py; }); cnt += fl.length; perim += dp; flowersOf[oi] = fl; };
-  const placeNew = (login, oi) => {
+  const placeNew = (login, oi, near) => {
     // a quarter of spare room is held back as open water, so a hub can take in new repos without nudging its neighbours
     const k = kFor(owners[login].repos.length);
     let cands;
@@ -2753,43 +2754,92 @@ function hexLayout(owners, towns, saved) {
     else {
       const set = new Map();
       for (const kk of land.keys()) { const [a, b] = kk.split(',').map(Number); for (const [da, db] of HX_DIRS) { const x = a + da, y = b + db, nk = K(x, y); if (!land.has(nk) && !set.has(nk)) set.set(nk, [x, y]); } }
-      cands = [...set.values()]; const step = Math.ceil(cands.length / 120); if (step > 1) cands = cands.filter((_, i) => i % step === 0);
+      cands = [...set.values()];
+      if (near) cands.sort((u, v) => { const [ux, uy] = sp(u[0], u[1]), [vx, vy] = sp(v[0], v[1]); return Math.hypot(ux - near[0], uy - near[1]) - Math.hypot(vx - near[0], vy - near[1]); }).splice(160);
+      else { const step = Math.ceil(cands.length / 120); if (step > 1) cands = cands.filter((_, i) => i % step === 0); }
     }
     let best = null, bs = 1e18;
     for (const c of cands) {
-      const g = grow(c, k, login);
+      const g = grow(c, k, login); if (!g) continue;
       let x = sX, y = sY, q = sQ; for (const [a, b] of g.region) { const [px, py] = sp(a, b); x += px; y += py; q += px * px + py * py; }
       const n = cnt + k, rg = Math.sqrt(Math.max(0, q / n - (x / n) ** 2 - (y / n) ** 2));
-      const sc = (perim + g.dp) + 5 * rg + 2 * hxNoise(login + '@' + K(c[0], c[1])) + embrace(g.region, oi);
+      let sc = (perim + g.dp) + 5 * rg + 2 * hxNoise(login + '@' + K(c[0], c[1])) + embrace(g.region, oi);
+      if (near) { const [cx0, cy0] = sp(c[0], c[1]); sc += 1.5 * Math.hypot(cx0 - near[0], cy0 - near[1]); }
       if (sc < bs) { bs = sc; best = g; }
     }
-    commit(oi, best.region, best.dp);
+    if (!best) return false;
+    commit(oi, best.region, best.dp); return true;
   };
-  // 1. every saved hub goes back exactly where it was
+  // 1. every saved hub goes back exactly where it was. A hub that was left in separate pieces keeps only its main body;
+  //    the pieces are given back to the water and re-homed in step 2.
+  const comps = (fl) => {
+    const keys = new Map(fl.map(([a, b], i) => [K(a, b), i])), seen = new Set(), out = [];
+    fl.forEach(([a, b], i) => {
+      if (seen.has(i)) return; const comp = [], st = [i]; seen.add(i);
+      while (st.length) { const j = st.pop(); comp.push(j); const [ja, jb] = fl[j]; for (const [da, db] of HX_DIRS) { const n = keys.get(K(ja + da, jb + db)); if (n !== undefined && !seen.has(n)) { seen.add(n); st.push(n); } } }
+      out.push(comp);
+    });
+    return out;
+  };
   logins.forEach((login, oi) => {
     const s0 = sv[login]; if (!s0) return;
-    const fl = []; for (const [a, b] of s0.f) if (!land.has(K(a, b))) fl.push([a, b]);
+    let fl = []; for (const [a, b] of s0.f) if (!land.has(K(a, b))) fl.push([a, b]);
+    const cs = comps(fl);
+    if (cs.length > 1) { const main = cs.reduce((m, c) => (c.length > m.length ? c : m), cs[0]), keep = new Set(main); fl = fl.filter((_, i) => keep.has(i)); }
     commit(oi, fl, 0);
   });
-  // 2. a saved hub that has outgrown its flowers takes more beside its own land, in free water; nobody is moved
+  // 2. a saved hub that has outgrown its flowers takes more beside its own land. Free water first; failing that it borrows
+  //    flowers a neighbour is holding in reserve with no repos on them. Nobody's repos move and the hub stays in one piece.
+  const needFl = (l) => Math.ceil(owners[l].repos.length / 7);
+  const touching = (fl, x, y, oi) => { let t = 0; for (const [da, db] of HX_DIRS) if (land.get(K(x + da, y + db)) === oi) t++; return t; };
   logins.forEach((login, oi) => {
     const s0 = sv[login]; if (!s0) return; const n0 = owners[login].repos.length;
-    if (n0 <= flowersOf[oi].length * 7) return;
     const want = kFor(n0);
+    // can it reach the room it needs beside its own land? free water joined to it, plus spare flowers next door
+    if (flowersOf[oi].length * 7 < n0) {
+      const seenF = new Set(), st = []; let room = 0;
+      for (const [a, b] of flowersOf[oi]) for (const [da, db] of HX_DIRS) { const x = a + da, y = b + db, kk = K(x, y); if (!land.has(kk) && !seenF.has(kk)) { seenF.add(kk); st.push([x, y]); } }
+      while (st.length && room < 60) { const [a, b] = st.pop(); room++; for (const [da, db] of HX_DIRS) { const x = a + da, y = b + db, kk = K(x, y); if (!land.has(kk) && !seenF.has(kk)) { seenF.add(kk); st.push([x, y]); } } }
+      let spareN = 0;
+      for (let o = 0; o < logins.length; o++) { if (o === oi || !flowersOf[o]) continue; for (const [x, y] of flowersOf[o].slice(Math.ceil(owners[logins[o]].repos.length / 7))) if (touching(flowersOf[oi], x, y, oi)) spareN++; }
+      if (room + spareN < needFl(login) - flowersOf[oi].length) {
+        // boxed in: the hub is charted afresh on the nearest stretch of coast, so it stays whole and in the same part of the map
+        const old = flowersOf[oi], nx = old.reduce((q, [a, b]) => q + sp(a, b)[0] / old.length, 0), ny = old.reduce((q, [a, b]) => q + sp(a, b)[1] / old.length, 0);
+        for (const [a, b] of old) { land.delete(K(a, b)); const [px, py] = sp(a, b); sX -= px; sY -= py; sQ -= px * px + py * py; } cnt -= old.length; flowersOf[oi] = [];
+        delete sv[login]; if (placeNew(login, oi, [nx, ny])) return;
+        for (const [a, b] of old) { land.set(K(a, b), oi); const [px, py] = sp(a, b); sX += px; sY += py; sQ += px * px + py * py; } cnt += old.length; flowersOf[oi] = old;
+      }
+    }
+    const take = (x, y, from) => {
+      if (from !== undefined) { const f2 = flowersOf[from], at = f2.findIndex(([a, b]) => a === x && b === y); if (at >= 0) f2.splice(at, 1); }
+      land.set(K(x, y), oi); flowersOf[oi].push([x, y]);
+      if (from === undefined) { const [px, py] = sp(x, y); sX += px; sY += py; sQ += px * px + py * py; cnt++; }
+    };
     while (flowersOf[oi].length < want) {
-      const mine = flowersOf[oi], mc = mine.reduce((p0, [a, b]) => { const [x, y] = sp(a, b); return [p0[0] + x / mine.length, p0[1] + y / mine.length]; }, [0, 0]);
-      // free water beside the hub's own land; a landlocked hub reaches out to the nearest open water instead of pushing neighbours
-      const set = new Map();
-      for (let reach = 3; reach <= 16 && !set.size; reach += 3) for (const [a, b] of mine) for (let da = -reach; da <= reach; da++) for (let db = -reach; db <= reach; db++) { const x = a + da, y = b + db, kk = K(x, y); if (hxDist(da, db) > reach || land.has(kk) || set.has(kk)) continue; set.set(kk, [x, y]); }
+      const mine = flowersOf[oi], mand = mine.length * 7 < n0;
+      const mc = mine.reduce((p0, [a, b]) => { const [x, y] = sp(a, b); return [p0[0] + x / mine.length, p0[1] + y / mine.length]; }, [0, 0]);
+      const dist = (x, y) => { const [px, py] = sp(x, y); return Math.hypot(px - mc[0], py - mc[1]); };
+      // free water touching the hub
       let pick = null, bs = 1e18;
-      for (const [x, y] of set.values()) {
-        let touch = 0; for (const [da, db] of HX_DIRS) if (land.get(K(x + da, y + db)) === oi) touch++;
-        const [px, py] = sp(x, y), d = Math.hypot(px - mc[0], py - mc[1]);
-        const sc = (touch ? 0 : 40) + d * 1.2 - touch * 1.5 + 1.2 * hxNoise(login + ':+' + K(x, y)) + embrace([...mine, [x, y]], oi);
+      for (const [a, b] of mine) for (const [da, db] of HX_DIRS) {
+        const x = a + da, y = b + db; if (land.has(K(x, y))) continue;
+        const t = touching(mine, x, y, oi), sc = dist(x, y) * 1.2 - t * 1.5 + 1.2 * hxNoise(login + ':+' + K(x, y)) + embrace([...mine, [x, y]], oi);
         if (sc < bs) { bs = sc; pick = [x, y]; }
       }
-      if (!pick) break;
-      land.set(K(pick[0], pick[1]), oi); mine.push(pick); const [px, py] = sp(pick[0], pick[1]); sX += px; sY += py; sQ += px * px + py * py; cnt++;
+      if (pick) { take(pick[0], pick[1]); continue; }
+      if (!mand) break; // spare room is never borrowed, only needed room
+      // borrow a reserved, empty flower from a neighbour
+      let borrow = null; bs = 1e18;
+      for (let o = 0; o < logins.length; o++) {
+        if (o === oi || !flowersOf[o]) continue; const spare = flowersOf[o].slice(Math.ceil(owners[logins[o]].repos.length / 7));
+        for (const [x, y] of spare) { if (!touching(mine, x, y, oi)) continue; const sc = dist(x, y) + embrace([...mine, [x, y]], oi); if (sc < bs) { bs = sc; borrow = [x, y, o]; } }
+      }
+      if (borrow) { take(borrow[0], borrow[1], borrow[2]); continue; }
+      // nothing free or spare next door: the nearest open water, however far
+      const set = new Map();
+      for (let reach = 3; reach <= 16 && !set.size; reach += 3) for (const [a, b] of mine) for (let da = -reach; da <= reach; da++) for (let db = -reach; db <= reach; db++) { const x = a + da, y = b + db, kk = K(x, y); if (hxDist(da, db) > reach || land.has(kk) || set.has(kk)) continue; set.set(kk, [x, y]); }
+      pick = null; bs = 1e18; for (const [x, y] of set.values()) { const sc = dist(x, y) + hxNoise(login + ':~' + K(x, y)); if (sc < bs) { bs = sc; pick = [x, y]; } }
+      if (!pick) break; take(pick[0], pick[1]);
     }
   });
   // 3. new hubs: the same coastal placement as before, after everything that is already charted
@@ -2845,34 +2895,46 @@ function libLayout(towns, bounds, landCells) {
   if (land.length) { lx = land.reduce((a, c) => a + c.x, 0) / land.length; ly = land.reduce((a, c) => a + c.y, 0) / land.length; }
   let ux = 0, uy = 0, un = 0; for (const L of libs) for (const h of L.hoods) { const c = byKey.get(h); if (c) { ux += c.x; uy += c.y; un++; } }
   let dx = un ? ux / un - lx : 1, dy = un ? uy / un - ly : 0; const dl = Math.hypot(dx, dy); if (dl < 1.5) { dx = 1; dy = 0.25; } else { dx /= dl; dy /= dl; }
-  const total = libs.reduce((a, l) => a + l.k, 0), Ri = 0.95 * Math.sqrt(total) + 1.2;
+  // The landmass is carved from warped noise instead of grown as a blob: long along the coast, ragged on both sides, with
+  // bays, headlands and a few islets. Then the libraries settle into it one by one.
+  const total = libs.reduce((a, l) => a + l.k, 0), N = Math.round(total * 1.04);
+  const asp = 1.9, bb = Math.sqrt((N * 2.598) / (Math.PI * asp)), aa = bb * asp;
   let t = 0, px = lx, py = ly;
-  for (; t < 300; t += 0.5) { px = lx + dx * t; py = ly + dy * t; let m = 1e9; for (const c of land) { const d = Math.hypot(c.x - px, c.y - py); if (d < m) m = d; } if (m >= Ri + 2.6) break; }
-  const r0 = Math.round(py / 1.5), q0 = Math.round(px / HX_SQ3 - r0 / 2), [ix, iy] = hxPx(q0, r0);
-  const free = (q, r) => !cells.has(q + ',' + r);
-  const nb = (q, r) => HX_DIRS.filter(([a, b]) => cells.has((q + a) + ',' + (r + b))).length;
-  const pxd = (q, r, x, y) => { const [x1, y1] = hxPx(q, r); return Math.hypot(x1 - x, y1 - y); };
+  for (; t < 400; t += 0.5) { px = lx + dx * t; py = ly + dy * t; let m = 1e9; for (const c of land) { const d = Math.hypot(c.x - px, c.y - py); if (d < m) m = d; } if (m >= bb * 1.5 + 3) break; }
+  const tx = -dy, ty = dx; // along the coast
+  const vn = (x, y) => { const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi, sm = (u) => u * u * (3 - 2 * u); const n = (a, b) => hxNoise('i' + a + ',' + b); return n(xi, yi) * (1 - sm(fx)) * (1 - sm(fy)) + n(xi + 1, yi) * sm(fx) * (1 - sm(fy)) + n(xi, yi + 1) * (1 - sm(fx)) * sm(fy) + n(xi + 1, yi + 1) * sm(fx) * sm(fy); };
+  const R0 = Math.ceil(aa * 1.9) + 4, r0 = Math.round(py / 1.5), q0 = Math.round(px / HX_SQ3 - r0 / 2), pool = [];
+  for (let r = r0 - R0; r <= r0 + R0; r++) for (let q = q0 - 2 * R0; q <= q0 + 2 * R0; q++) {
+    const [x, y] = hxPx(q, r), u = (x - px) * tx + (y - py) * ty, v = (x - px) * dx + (y - py) * dy;
+    const warp = 0.55 * (vn(u * 0.28 + 11, v * 0.28 + 5) - 0.5) + 0.3 * (vn(u * 0.7 + 3, v * 0.7 + 9) - 0.5) + 0.12 * (vn(u * 1.6 + 7, v * 1.6 + 1) - 0.5);
+    const sc = Math.hypot(u / aa, v / bb) + warp * 2.1 + (v > 0 ? 0 : 0.05); // the coast facing the mainland is slightly gentler
+    pool.push({ q, r, x, y, sc });
+  }
+  pool.sort((a, b) => a.sc - b.sc); const keep = pool.slice(0, N), avail = new Map(keep.map((c) => [c.q + ',' + c.r, { q: c.q, r: c.r, x: c.x, y: c.y }]));
+  const cx0 = keep.reduce((a, c) => a + c.x, 0) / keep.length, cy0 = keep.reduce((a, c) => a + c.y, 0) / keep.length;
+  const pxd = (a, x, y) => Math.hypot(a.x - x, a.y - y);
+  const taken = new Set();
+  const addTo = (L, li, c) => { const cell = { q: c.q, r: c.r, x: c.x, y: c.y, li }; cells.set(c.q + ',' + c.r, cell); L.cells.push(cell); taken.add(c.q + ',' + c.r); };
+  const near = (x, y) => { let best = null, bs = 1e18; for (const c of avail.values()) { if (taken.has(c.q + ',' + c.r)) continue; const d = pxd(c, x, y); if (d < bs) { bs = d; best = c; } } return best; };
   libs.forEach((L, li) => {
-    let seed = [q0, r0];
-    if (li) {
-      // small libraries sometimes sit a water hex apart as islets; the rest hug the main body
-      const apart = L.k <= 2 && hxNoise(L.key + '!') < 0.4; let best = null, bs = 1e9;
-      const ring = new Set(); for (const c of cells.values()) for (const [a, b] of HX_DIRS) { const q = c.q + a, r = c.r + b; if (free(q, r)) ring.add(q + ',' + r); }
-      const cand = new Map();
-      if (apart) { for (const k2 of ring) { const [q, r] = k2.split(',').map(Number); for (const [a, b] of HX_DIRS) { const q2 = q + a, r2 = r + b; if (free(q2, r2) && !ring.has(q2 + ',' + r2)) cand.set(q2 + ',' + r2, [q2, r2]); } } } else for (const k2 of ring) cand.set(k2, k2.split(',').map(Number));
-      for (const [q, r] of cand.values()) { const sc = pxd(q, r, ix, iy) * (apart ? 0.9 : 1) + 2.8 * hxNoise(L.key + q + ',' + r) - (apart ? 0 : 0.5 * nb(q, r)); if (sc < bs) { bs = sc; best = [q, r]; } }
-      seed = best || seed;
-    }
-    const add = (q, r) => { const [x, y] = hxPx(q, r); const c = { q, r, x, y, li }; cells.set(q + ',' + r, c); L.cells.push(c); };
-    add(seed[0], seed[1]);
-    const [sx, sy] = hxPx(seed[0], seed[1]);
+    // each library aims for its own spot inside the landmass; small ones lean toward the fringe
+    const ru = (hxNoise(L.key + 'u') * 2 - 1) * (L.k <= 2 ? 0.95 : 0.7), rv = (hxNoise(L.key + 'v') * 2 - 1) * (L.k <= 2 ? 0.95 : 0.7);
+    const tgx = cx0 + tx * ru * aa + dx * rv * bb, tgy = cy0 + ty * ru * aa + dy * rv * bb;
+    const seed = near(tgx, tgy); if (!seed) return; addTo(L, li, seed);
     while (L.cells.length < L.k) {
-      let best = null, bs = 1e9;
-      for (const c of L.cells) for (const [a, b] of HX_DIRS) { const q = c.q + a, r = c.r + b; if (!free(q, r)) continue; const sc = pxd(q, r, sx, sy) + 1.9 * hxNoise(L.key + ':' + q + ',' + r) - 0.2 * nb(q, r); if (sc < bs) { bs = sc; best = [q, r]; } }
-      if (!best) break; add(best[0], best[1]);
+      let best = null, bs = 1e18;
+      for (const c of L.cells) for (const [a, b] of HX_DIRS) { const q = c.q + a, r = c.r + b, kk = q + ',' + r, n = avail.get(kk); if (!n || taken.has(kk)) continue; const sc = pxd(n, seed.x, seed.y) + 1.4 * hxNoise(L.key + ':' + kk); if (sc < bs) { bs = sc; best = n; } }
+      if (!best) break; addTo(L, li, best);
     }
-    L.cx = L.cells.reduce((a, c) => a + c.x, 0) / L.cells.length; L.cy = L.cells.reduce((a, c) => a + c.y, 0) / L.cells.length;
   });
+  // whatever land is left joins the library beside it (or the nearest one, for a stray islet)
+  for (let pass = 0; pass < 6; pass++) for (const c of avail.values()) {
+    const kk = c.q + ',' + c.r; if (taken.has(kk)) continue; let li = -1;
+    for (const [a, b] of HX_DIRS) { const o = cells.get((c.q + a) + ',' + (c.r + b)); if (o) { li = o.li; break; } }
+    if (li < 0 && pass > 3) { let bs = 1e18; for (const o of cells.values()) { const d = pxd(o, c.x, c.y); if (d < bs) { bs = d; li = o.li; } } }
+    if (li >= 0) addTo(libs[li], li, c);
+  }
+  libs.forEach((L) => { if (L.cells.length) { L.cx = L.cells.reduce((a, c) => a + c.x, 0) / L.cells.length; L.cy = L.cells.reduce((a, c) => a + c.y, 0) / L.cells.length; } else { L.cx = cx0; L.cy = cy0; } });
   return { libs, cells, byKey: new Map(libs.map((l) => [l.key, l])) };
 }
 
@@ -3104,7 +3166,7 @@ class HexWorld {
       ctx.strokeStyle = 'rgba(74,62,48,0.72)'; ctx.lineWidth = lw(1.5); ctx.stroke(P.border);
       ctx.strokeStyle = 'rgba(74,62,48,0.55)'; ctx.lineWidth = lw(1); ctx.stroke(P.coast);
     }
-    for (const login of new Set([outlineLogin, only ? null : hovLogin])) {
+    for (const login of new Set([only ? null : outlineLogin, only ? null : hovLogin])) {
       if (!login) continue; const t = this.byLogin.get(login); if (!t) continue;
       ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = lw(5.5); ctx.stroke(P.outline[t.oi]);
       ctx.strokeStyle = this.colors[t.oi].ink; ctx.lineWidth = lw(2.4); ctx.stroke(P.outline[t.oi]);
@@ -3114,7 +3176,7 @@ class HexWorld {
     ctx.restore();
     // per-hex detail for what is on screen
     if (z >= 6) this._detail(W, H, z, only ? focusLogin : null);
-    if (z < 36) this._labels(W, H, z, only ? focusLogin : null);
+    if (z < (only ? 20 : 36)) this._labels(W, H, z, only ? focusLogin : null);
     if (!only) this._libLabels(W, H, z);
   }
   // a raised hexagon: two south-facing walls under a top that is lifted by h (world units)
@@ -3124,9 +3186,10 @@ class HexWorld {
     quad(1, 2, wallE); quad(2, 3, wallW);
     ctx.beginPath(); C.forEach((_, k) => { const q = P(k, 1); if (k) ctx.lineTo(q[0], q[1]); else ctx.moveTo(q[0], q[1]); }); ctx.closePath(); ctx.fillStyle = top; ctx.fill(); ctx.lineWidth = lw(1); ctx.strokeStyle = line; ctx.stroke();
   }
-  _hf(z) { return Math.max(0.4, Math.min(1.3, 1.35 - z / 45)); }
+  _hf(z) { return this.hubOnly ? 0 : Math.max(0.4, Math.min(1.3, 1.35 - z / 45)); }
   _pillars(ctx, W, H, z, lw, only, focusLogin) {
     const f = this._hf(z), [ux0, uy0] = this.U(-60, -60), [ux1, uy1] = this.U(W + 60, H + 60), list = [];
+    if (!f) return;
     for (const c of this.cells.values()) {
       if (!c.h || c.x < ux0 - 2 || c.x > ux1 + 2 || c.y < uy0 - 1 || c.y > uy1 + 3) continue;
       if (only && c.login !== only) continue; if (this.lang && c.repo.lang !== this.lang) continue;
@@ -3191,10 +3254,19 @@ class HexWorld {
         } else { ctx.beginPath(); ctx.arc(sx, sy, Math.max(2.2, z * 0.3), 0, 7); ctx.fillStyle = langColor(t.domLang || 'other'); ctx.fill(); ctx.lineWidth = 1; ctx.strokeStyle = PAL.ink; ctx.stroke(); }
       } else if (z >= 14 && !names) { ctx.beginPath(); ctx.arc(sx, sy, Math.max(1.5, z * 0.1), 0, 7); ctx.fillStyle = 'rgba(255,255,255,0.65)'; ctx.fill(); }
       if (names) {
-        let nm = c.repo.name; const maxw = z * 1.6, fs = Math.max(8, Math.min(12, z * 0.3)); ctx.font = `500 ${fs}px system-ui, sans-serif`;
-        while (nm.length > 3 && ctx.measureText(nm).width > maxw) nm = nm.slice(0, -2);
-        if (nm !== c.repo.name) nm += '…';
-        this._t(nm, sx, sy + (t ? z * 0.66 : 0), { size: fs, w: 500, halo: 'rgba(250,246,236,0.9)' });
+        // the name wraps onto up to three lines and sits inside the hex, over the town picture
+        const fs = Math.max(8, Math.min(12, z * 0.26)), maxw = z * 1.5, lh = fs * 1.12; ctx.font = `600 ${fs}px system-ui, sans-serif`;
+        const parts = c.repo.name.split(/(?<=[-_./ ])/), lines = []; let cur = '';
+        const fit = (t) => ctx.measureText(t).width <= maxw;
+        for (let part of parts) {
+          while (!fit(part) && part.length > 3) { let k = part.length; while (k > 2 && !fit(part.slice(0, k))) k--; if (cur) { lines.push(cur); cur = ''; } lines.push(part.slice(0, k)); part = part.slice(k); }
+          if (!cur) cur = part; else if (fit(cur + part)) cur += part; else { lines.push(cur); cur = part; }
+        }
+        if (cur) lines.push(cur);
+        const maxL = Math.max(1, Math.min(3, Math.floor((z * 1.6) / lh)));
+        if (lines.length > maxL) { lines.length = maxL; let t = lines[maxL - 1]; while (t.length > 1 && !fit(t + '…')) t = t.slice(0, -1); lines[maxL - 1] = t + '…'; }
+        const y0 = sy - ((lines.length - 1) * lh) / 2;
+        lines.forEach((ln, i) => this._t(ln.replace(/\s+$/, ''), sx, y0 + i * lh, { size: fs, w: 600, halo: 'rgba(250,246,236,0.92)' }));
       }
     }
     // hovered or searched hex
