@@ -1083,10 +1083,10 @@ function buildTown(scan) {
   const thr = Math.max(1, totalTraffic * 0.004);
   const dd = dOrder.map((id) => {
     const bs = buildings.filter((b) => b.district === id).sort((a, b) => (b.kind === 'hall') - (a.kind === 'hall') || b.w * b.d - a.w * a.d || (a.path < b.path ? -1 : 1));
-    return { id, bs, base: Math.max(6, bs.reduce((acc, b) => acc + (b.w + 0.4) * (b.d + 0.4), 0) / 0.75), fa: 1 };
+    return { id, bs, base: Math.max(16, (bs.reduce((acc, b) => acc + (b.w + 0.4) * (b.d + 0.4), 0) + 2.6) / 0.66), fa: 1 };
   });
   let Rin = 1, layoutOut = null;
-  for (let attempt = 0; attempt < 8 && !layoutOut; attempt++) {
+  for (let attempt = 0; attempt < 16 && !layoutOut; attempt++) {
     const T = dd.map((d) => d.base * d.fa), n = dd.length;
     Rin = Math.sqrt(T.reduce((a, b) => a + b, 0) / 2.598);
     const rad = T.map((t) => Math.sqrt(t / Math.PI));
@@ -1120,6 +1120,7 @@ function buildTown(scan) {
     dd.forEach((d, i) => {
       const P = plates[i], cen = centroidOf(P), gr = rng(hashStr(scan.owner + '/' + scan.repo + '#' + d.id));
       const edgesP = P.map((A, k) => { const B = P[(k + 1) % P.length], ex = B[0] - A[0], ey = B[1] - A[1], l = Math.hypot(ex, ey) || 1; let nx = ey / l, ny = -ex / l; if ((cen[0] - A[0]) * nx + (cen[1] - A[1]) * ny > 0) { nx = -nx; ny = -ny; } return [A[0], A[1], nx, ny]; });
+      const fitIn = (x, y, hw, hd) => { for (const [ax, ay, nx, ny] of edgesP) if (-((x - ax) * nx + (y - ay) * ny) < hw * Math.abs(nx) + hd * Math.abs(ny) + 0.14) return false; return true; };
       const inside = (x, y) => { let m = Infinity; for (const [ax, ay, nx, ny] of edgesP) { const dist = -((x - ax) * nx + (y - ay) * ny); if (dist < m) m = dist; } return m; };
       const xs = P.map((q) => q[0]), ys = P.map((q) => q[1]), x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys);
       // the district's name lies on the ground near the plate's southern edge; keep buildings off it
@@ -1127,20 +1128,32 @@ function buildTown(scan) {
       for (let k = 0; k < 10 && (!sp || sp[1] - sp[0] < want); k++) { ly -= 0.25; sp = spanAt(P, ly); }
       const lw = sp ? Math.max(1.2, sp[1] - sp[0] - 0.8) : 2; const lx = sp ? (sp[0] + sp[1]) / 2 : cen[0];
       d.label = { x: lx, y: ly, w: lw };
-      const put = d.bs.length ? [{ x: lx, y: ly, hw: lw / 2, hd: 0.65 }] : [];
-      let failed = 0; const M = 0.18;
-      for (const b of d.bs) {
-        const hw = b.w / 2, hd = b.d / 2, r = Math.max(hw, hd) * 0.9 + 0.2; let best = null, bs = -Infinity;
-        for (let t = 0; t < 2500 && (best == null || t < 140); t++) {
-          const first = !put.length || (put.length === 1 && t === 0);
-          const x = t === 0 && b.kind === 'hall' ? cen[0] : x0 + gr() * (x1 - x0), y = t === 0 && b.kind === 'hall' ? cen[1] : y0 + gr() * (y1 - y0);
-          if (inside(x, y) < r) continue;
-          let sc = Infinity; for (const q of put) { const sep = Math.max(Math.abs(x - q.x) - hw - q.hw, Math.abs(y - q.y) - hd - q.hd); if (sep < sc) sc = sep; if (sc < M) break; }
-          if (sc >= M && sc > bs) { bs = sc; best = [x, y]; if (first || (t === 0 && b.kind === 'hall')) break; }
+      // dense packing: every file takes the first free spot walking outward from the plate's centre (with a little
+      // randomness so the edge stays ragged); an occupancy raster keeps the gaps exact. Tries roomy settings first,
+      // then squeezes (smaller gaps, thinner edge margin, no name strip) before the plate is ever enlarged.
+      const RES = 0.1, gw = Math.ceil((x1 - x0) / RES) + 2, gh = Math.ceil((y1 - y0) / RES) + 2;
+      const cx = (x) => Math.floor((x - x0) / RES) + 1, cy = (y) => Math.floor((y - y0) / RES) + 1;
+      const cand = []; const STEP = 0.3;
+      for (let yy = y0; yy <= y1; yy += STEP) for (let xx = x0; xx <= x1; xx += STEP) { const jx = xx + (gr() - 0.5) * STEP, jy = yy + (gr() - 0.5) * STEP; if (inside(jx, jy) > 0.1) cand.push([jx, jy, Math.hypot(jx - cen[0], jy - cen[1]) * (0.8 + 0.4 * gr())]); }
+      cand.sort((p1, q1) => p1[2] - q1[2]);
+      const pack = (M, edge, strip) => {
+        const occ = new Uint8Array(gw * gh), out = []; let miss = 0;
+        const mark = (x, y, hw, hd, grow) => { const ax = Math.max(0, cx(x - hw - grow)), bx = Math.min(gw - 1, cx(x + hw + grow)), ay = Math.max(0, cy(y - hd - grow)), by = Math.min(gh - 1, cy(y + hd + grow)); for (let v = ay; v <= by; v++) for (let u = ax; u <= bx; u++) occ[v * gw + u] = 1; };
+        const free = (x, y, hw, hd) => { const ax = cx(x - hw), bx = cx(x + hw), ay = cy(y - hd), by = cy(y + hd); if (ax < 0 || ay < 0 || bx >= gw || by >= gh) return false; for (let v = ay; v <= by; v++) for (let u = ax; u <= bx; u++) if (occ[v * gw + u]) return false; return true; };
+        const fits = (x, y, hw, hd) => { for (const [ax, ay, nx, ny] of edgesP) if (-((x - ax) * nx + (y - ay) * ny) < hw * Math.abs(nx) + hd * Math.abs(ny) + edge) return false; return true; };
+        if (strip && d.bs.length) mark(lx, ly, lw / 2, 0.65, M);
+        for (const b of d.bs) {
+          const hw = b.w / 2, hd = b.d / 2; let best = null;
+          if (b.kind === 'hall' && free(cen[0], cen[1], hw, hd) && fits(cen[0], cen[1], hw, hd)) best = [cen[0], cen[1]];
+          for (let k = 0; !best && k < cand.length; k++) { const c = cand[k]; if (free(c[0], c[1], hw, hd) && fits(c[0], c[1], hw, hd)) best = [c[0], c[1]]; }
+          if (best) mark(best[0], best[1], hw, hd, M); else miss++;
+          out.push(best);
         }
-        if (!best) { failed++; best = [cen[0] + (gr() - 0.5) * 2, cen[1] + (gr() - 0.5) * 2]; }
-        b.x = best[0]; b.y = best[1]; b.ang = (gr() - 0.5) * 0.24; b.gz = PAVE; put.push({ x: best[0], y: best[1], hw, hd });
-      }
+        return { out, miss };
+      };
+      let pk = pack(0.18, 0.14, true); if (pk.miss) { const q = pack(0.12, 0.08, true); if (q.miss < pk.miss) pk = q; } if (pk.miss) { const q = pack(0.07, 0.05, false); if (q.miss < pk.miss) pk = q; }
+      let failed = pk.miss;
+      d.bs.forEach((b, k) => { const best = pk.out[k] || [cen[0] + (gr() - 0.5) * 2, cen[1] + (gr() - 0.5) * 2]; b.x = best[0]; b.y = best[1]; b.ang = (gr() - 0.5) * 0.24; b.gz = PAVE; });
       if (failed) {
         // too dense to scatter: lay the files out in shelves inside the plate, deepest first
         let rem = d.bs.slice().sort((p1, q1) => q1.d - p1.d || q1.w - p1.w), y = y0 + 0.3;
@@ -1159,7 +1172,7 @@ function buildTown(scan) {
       if (failed) fails.push(i);
       d.plate = P; d.cen = cen;
     });
-    if (!fails.length || attempt === 7) layoutOut = true; else fails.forEach((i) => { dd[i].fa *= 1.45; });
+    if (!fails.length || attempt === 15) layoutOut = true; else fails.forEach((i) => { dd[i].fa *= 1.1; });
   }
   const tcx = 0, tcy = 0, mainId = dOrder[0];
   const HR = Rin + 1.4;
@@ -2349,7 +2362,10 @@ class Town3D {
     const lit = new Set(this.matches.map((b) => b.id));
     let sel = this.pinned || this.hover; if (!sel && this.routeStep != null && t.route && t.route[this.routeStep]) sel = { type: 'building', b: t.buildings[t.route[this.routeStep].id] };
     if (sel && sel.type === 'building') lit.add(sel.b.id);
-    const dim = this.matches.length > 0;
+    // a clicked file ghosts every building its wires don't touch; clicking away brings them back
+    let ghost = false;
+    if (this.pinned && this.pinned.type === 'building' && t.v >= 4 && this._wires) { ghost = true; const id = this.pinned.b.id; for (const w of this._wires) { if (w.lib) { if (w.a === id) { /* gate wire */ } continue; } if (w.a === id) lit.add(w.c); else if (w.c === id) lit.add(w.a); } }
+    const dim = this.matches.length > 0 || ghost;
     this._city.material.opacity = dim ? 0.22 : 1; this._city.material.depthWrite = !dim; this._cityLines.material.opacity = dim ? 0.25 : 1;
     for (const id of lit) { const B = this._bs[id]; if (!B) continue; const [m, l] = this._sliceOf(B, AX.route); if (dim) this.hot.add(m); this.hot.add(l);
       const r = Math.max(0.6, Math.hypot(B.box.max.x - B.box.min.x, B.box.max.z - B.box.min.z) / 2 + 0.15); const pts = []; for (let a = 0; a <= 48; a++) pts.push(new THREE.Vector3(B.b.x + Math.cos(a / 48 * Math.PI * 2) * r, B.gz + 0.02, B.b.y + Math.sin(a / 48 * Math.PI * 2) * r)); this.hot.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: AX.route }))); }
@@ -2359,7 +2375,7 @@ class Town3D {
       const id = sel.b.id, uses = new Set((t._out.get(id) || []).map((e) => e[0])), usedBy = new Set((t._in.get(id) || []).map((e) => e[0]));
       for (const w of this._wires) {
         if (w.a !== id && w.c !== id) continue; const other = w.a === id ? w.c : w.a;
-        const col = w.lib || uses.has(other) || !usedBy.has(other) ? 0xE2B54A : 0xE8735A;
+        const col = w.lib ? AX.route : uses.has(other) || !usedBy.has(other) ? 0xE2B54A : 0xE8735A;
         const curve = new THREE.CatmullRomCurve3(w.pts.map((p) => new THREE.Vector3(p[0], p[2], p[1])));
         this.overlay.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 24, 0.13, 6, false), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.3, depthWrite: false })));
         this.overlay.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 24, 0.045, 6, false), new THREE.MeshBasicMaterial({ color: col })));
@@ -2473,11 +2489,21 @@ class Town3D {
       const [x, y0, on] = proj(new THREE.Vector3(at.x, top, at.y)); if (!on) continue;
       const w = text.length * 6.3 + 14, h = 19;
       let placed = null;
-      for (const [dx, dy] of [[6, -12], [-6 - w, -12], [6, -34], [-6 - w, -34], [6, 8]]) {
+      const spots = [[6, -12], [-6 - w, -12], [6, -34], [-6 - w, -34], [6, 8], [-6 - w, 8], [-w / 2, -34], [6, -56], [-6 - w, -56], [-w / 2, -56], [6, 30], [-6 - w, 30], [-w / 2, 22], [6, -78], [-6 - w, -78], [-w / 2, -78], [6, 52], [-6 - w, 52], [-w / 2, 44]];
+      for (const [dx, dy] of spots) {
         const lx = Math.max(3, Math.min(W - w - 58, x + dx)), ty = Math.max(h / 2 + 2, y0 + dy);
         if (free(lx + w / 2, ty, w, h)) { placed = [lx, ty]; break; }
       }
-      if (!placed) { if (!strong) continue; placed = [Math.max(3, Math.min(W - w - 58, x + 6)), Math.max(h / 2 + 2, y0 - 12)]; }
+      if (!placed) {
+        if (!strong) continue;
+        // no clear spot: take the one that covers the least of the tags already down
+        let bestO = Infinity;
+        for (const [dx, dy] of spots) {
+          const lx = Math.max(3, Math.min(W - w - 58, x + dx)), ty = Math.max(h / 2 + 2, y0 + dy); let o = 0;
+          for (const r of taken) { const ox = Math.min(lx + w, r[0] + r[2] / 2) - Math.max(lx, r[0] - r[2] / 2), oy = Math.min(ty + h / 2, r[1] + r[3] / 2) - Math.max(ty - h / 2, r[1] - r[3] / 2); if (ox > 0 && oy > 0) o += ox * oy; }
+          if (o < bestO) { bestO = o; placed = [lx, ty]; }
+        }
+      }
       const el = get(used++); el.className = 'l3 file' + (it.hot ? ' hot' : ''); el.textContent = text; el.hidden = false;
       el.style.setProperty('--lx', Math.max(0, Math.min(w - 2, x - placed[0])) + 'px'); el.style.setProperty('--ly', Math.max(4, y0 - placed[1] - h / 2) + 'px');
       el.style.transform = `translate(${placed[0]}px, ${placed[1]}px) translate(0, -50%)`; taken.push([placed[0] + w / 2, placed[1], w, h]); shown++;
