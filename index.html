@@ -59,6 +59,7 @@ aside h4{margin:0 0 4px;font-size:15px;word-break:break-word}
 .list li b{white-space:nowrap;flex:none}
 .list li span,.list li button{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .list em{font-style:normal;font-size:11px;color:var(--accent);margin-left:4px}
+.list.wraps li span{white-space:normal;overflow-wrap:anywhere}
 .link{border:0;background:none;padding:0;color:var(--accent);text-align:left}
 .find-wrap{margin-bottom:10px}
 body[data-tab="world"] .find-wrap,body[data-tab="hub"] .find-wrap{display:none}
@@ -136,6 +137,22 @@ body[data-tab="world"] .mapbar,body[data-tab="hub"] .mapbar{display:flex}
 .mapres small{color:#7A6650;white-space:nowrap}
 .mapres span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sw{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:7px;border:1px solid #0003;vertical-align:-1px}
+.tour-pop{position:absolute;left:12px;bottom:12px;right:64px;max-width:380px;z-index:3;background:#FBF6ECF2;color:#3B2A1A;border:1px solid #CDBB98;border-radius:10px;padding:8px 10px;box-shadow:0 4px 14px #3B2A1A33;font-size:13px;line-height:1.35}
+.tour-pop[hidden],body:not([data-tab="town"]) .tour-pop{display:none}
+.tp-head{display:flex;gap:6px;align-items:baseline;min-width:0}.tp-head b{flex:none;background:#5E9C34;color:#fff;border-radius:9px;padding:0 7px;font-size:12px}
+.tp-head span{font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tp-how{margin:3px 0 0;color:#6E5A44;font-size:12px}.tp-doc{margin:3px 0 0;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.tp-nav{display:flex;gap:6px;margin-top:7px}.tp-nav button{flex:none;min-width:40px;padding:5px 10px;border:1px solid #CDBB98;background:#FFFDF8;color:#3B2A1A;border-radius:7px;font:600 13px system-ui,sans-serif}
+.tp-nav button[data-tour="next"]{flex:1}.tp-nav button:disabled{opacity:.45}
+.ptabs{display:none}
+aside[data-ptab] .ptabs{display:flex;gap:2px;position:sticky;top:0;z-index:3;background:var(--panel);margin:0 0 10px;padding:4px;border:1px solid var(--line);border-radius:10px}
+.ptabs button{flex:1 1 auto;min-width:0;border:0;background:none;color:var(--soft);padding:8px 2px;border-radius:7px;font:600 12.5px/1.2 system-ui,-apple-system,"Segoe UI",sans-serif;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ptabs button[aria-selected="true"]{background:var(--input);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line)}
+.file-hint{display:none}
+aside[data-ptab="file"] .file-hint:not([hidden]){display:block}
+aside[data-ptab] .pane,aside[data-ptab] #inspector{display:none}
+aside[data-ptab="overview"] .pane[data-pane="overview"],aside[data-ptab="tour"] .pane[data-pane="tour"],aside[data-ptab="conn"] .pane[data-pane="conn"]{display:block}
+aside[data-ptab="file"] #inspector[data-pane="file"],aside[data-ptab="tour"] #inspector[data-pane="tour"]{display:block}
 @media (max-width:820px){
   .mapbar{right:12px} .mapfind{flex:1 1 auto} .mapbar select{max-width:42%}
   main{grid-template-columns:minmax(0,1fr);grid-template-rows:62vh auto}
@@ -162,9 +179,9 @@ body[data-tab="world"] .mapbar,body[data-tab="hub"] .mapbar{display:flex}
     <div id="redraw" class="redraw" hidden><span>This hood was drawn with an older layout, so it only has the street map.</span><button class="btn small" id="redraw-btn" type="button">Redraw with the new layout</button></div>
     <canvas id="world-canvas"></canvas>
     <div class="mapbar"><div class="mapfind"><input id="mapfind" type="search" placeholder="Find a hub or repo" aria-label="Find a hub or repo on the map" autocomplete="off" spellcheck="false"><ul id="mapres" class="mapres" hidden></ul></div><select id="maplang" aria-label="Highlight a language"></select></div>
-    <div class="zoom"><button id="key" aria-label="Map key" title="What the shapes mean">?</button><button id="rotl" class="only3d" aria-label="Turn left a quarter" title="Turn left">⟲</button><button id="rotr" class="only3d" aria-label="Turn right a quarter" title="Turn right">⟳</button><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zfit" aria-label="Fit" title="Fit">⤢</button></div>
+    <div id="tour-pop" class="tour-pop" hidden aria-live="polite"></div><div class="zoom"><button id="key" aria-label="Map key" title="What the shapes mean">?</button><button id="rotl" class="only3d" aria-label="Turn left a quarter" title="Turn left">⟲</button><button id="rotr" class="only3d" aria-label="Turn right a quarter" title="Turn right">⟳</button><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button><button id="zfit" aria-label="Fit" title="Fit">⤢</button></div>
   </div>
-  <aside><div class="find-wrap"><input id="find" type="search" placeholder="Find a file or function in this hood" aria-label="Find a file" autocomplete="off" spellcheck="false"><div id="find-bar" class="find-bar" hidden><span id="find-count"></span><button id="find-prev" type="button" aria-label="Previous match">‹</button><button id="find-next" type="button" aria-label="Next match">›</button><button id="find-clear" type="button">Clear</button></div><ul id="find-results" class="list"></ul></div><div id="inspector"></div><div id="summary"></div></aside>
+  <aside><div class="find-wrap"><input id="find" type="search" placeholder="Find a file or function in this hood" aria-label="Find a file" autocomplete="off" spellcheck="false"><div id="find-bar" class="find-bar" hidden><span id="find-count"></span><button id="find-prev" type="button" aria-label="Previous match">‹</button><button id="find-next" type="button" aria-label="Next match">›</button><button id="find-clear" type="button">Clear</button></div><ul id="find-results" class="list"></ul></div><div id="ptabs" class="ptabs" role="tablist"><button data-ptab="overview" role="tab">Overview</button><button data-ptab="tour" role="tab">Tour</button><button data-ptab="file" role="tab">File</button><button data-ptab="conn" role="tab">Connections</button></div><p id="file-hint" class="muted file-hint">Tap a building to see what it does, what it uses and what uses it.</p><div id="inspector"></div><div id="summary"></div></aside>
 </main>
 <div class="shelf-wrap"><b>On the map · <span id="shelf-count"></span></b></div>
 <dialog id="legend" aria-label="Map key"><form method="dialog"><div class="legend-head"><h3>Map key</h3><button class="ghost" value="close" aria-label="Close">✕</button></div><div id="legend-body"></div></form></dialog>
@@ -436,7 +453,7 @@ function parseManifest(name, text) {
       Object.keys(j.dependencies || {}).forEach((n) => put(n, 'run'));
       Object.keys(j.peerDependencies || {}).forEach((n) => put(n, 'run'));
       Object.keys(j.devDependencies || {}).forEach((n) => put(n, 'dev'));
-      return { deps, pkgName: j.name || null, workspaces: j.workspaces || null };
+      return { deps, pkgName: j.name || null, workspaces: j.workspaces || null, main: typeof j.main === 'string' ? j.main : typeof j.module === 'string' ? j.module : (j.bin && typeof j.bin === 'object' ? Object.values(j.bin)[0] : typeof j.bin === 'string' ? j.bin : null) };
     }
     if (name.startsWith('requirements')) {
       text.split('\n').forEach((l) => { const m = l.trim().match(/^([A-Za-z0-9_.\-]+)/); if (m && !l.trim().startsWith('#') && !l.trim().startsWith('-')) put(m[1], name.includes('dev') ? 'dev' : 'run'); });
@@ -706,8 +723,11 @@ function makeResolver(scan, pathSet) {
       if (/^https?:\/\//.test(spec) || spec.startsWith('//')) { const n = cdnName(spec.startsWith('//') ? 'https:' + spec : spec); return n ? { ext: n.replace(/\.min$/, '') } : null; }
       if (spec.startsWith('.') || spec.startsWith('/') || (lang === 'html' || lang === 'css' || lang === 'markdown') && !spec.includes(':')) {
         const base = spec.startsWith('/') ? spec.slice(1) : joinPath(dir, spec.split('?')[0]);
-        const hit = jsLocal(base);
-        return hit ? { int: hit } : null;
+        // a link to a folder means that folder's page
+        const b2 = base.replace(/\/+$/, '');
+        const page = (lang === 'html' || lang === 'markdown') && ['/index.html', '/index.htm', '/README.md'].map((e) => (b2 ? b2 + e : e.slice(1))).find(has);
+        const hit = page || jsLocal(b2 || base);
+        return hit && hit !== from ? { int: hit } : null;
       }
       if (spec.startsWith('node:')) return { std: spec };
       const pn = pkgName(spec);
@@ -1276,21 +1296,55 @@ function buildTown(scan) {
   const codeBs = buildings.filter((b) => !['library', 'reading', 'plaque', 'fence', 'customs', 'warehouse', 'gallery', 'yard', 'trash', 'stake'].includes(b.kind));
   const cands = codeBs.filter((b) => b.kind === 'hall' || (b.info && b.info.main));
   const startPool = (cands.length ? cands : codeBs.filter((b) => b.inDeg === 0 && b.outDeg > 0)).concat(codeBs.filter((b) => b.outDeg > 0));
-  let entry = null, bestR = 0; for (const b of startPool) { const r = reach(b.id) + (b.kind === 'hall' ? 0.5 : 0); if (r > bestR) { bestR = r; entry = b; } }
+  // tests, benchmarks, examples and helper scripts reach a lot but are not the program
+  const side = (b) => /(^|\/)(tests?|__tests__|spec|benchmarks?|bench|examples?|demos?|docs?|scripts?|tools?|e2e|fixtures?)\//i.test(b.path);
+  let entry = null, bestR = 0; for (const b of startPool) { const r = (reach(b.id) + (b.kind === 'hall' ? 0.5 : 0)) * (side(b) ? 0.3 : 1); if (r > bestR) { bestR = r; entry = b; } }
+  // the package's declared main file wins outright
+  for (const m of scan.manifests || []) if (m.main) { const want = joinPath(dirname(m.path), m.main.replace(/^\.\//, '')); const hit = codeBs.find((b) => b.path === want || b.paths.includes(want) || b.path === want.replace(/\.js$/, '.ts')); if (hit && reach(hit.id) > 1) { entry = hit; bestR = reach(hit.id); entry._declared = true; break; } }
+  // a front door at the top of the repo (index.html, main.py, app.js...) wins when it reaches most of what the busiest one does
+  const front = startPool.filter((b) => !b.path.includes('/') && /^(index\.html?|main\.|app\.|server\.|__main__\.|cli\.|index\.)/i.test(b.name)).sort((a, b) => reach(b.id) - reach(a.id))[0];
+  if (front && !(entry && entry._declared) && reach(front.id) >= bestR * 0.5) entry = front;
   const serves = new Map(); for (const sid of servers) serves.set(sid, [...metricsByB.entries()].filter(([id, m]) => m.fetchLocal && id !== sid).map(([id, m]) => [id, m.fetchLocal]));
   const reachN = new Map(); codeBs.forEach((b) => reachN.set(b.id, reach(b.id)));
   outs.forEach((l) => l.sort((x, y) => y[1] - x[1] || (reachN.get(y[0]) || 0) - (reachN.get(x[0]) || 0) || buildings[y[0]].lines - buildings[x[0]].lines));
+  // ---- the tour: the files that do the work, in the order the program reaches them
+  // stops are logic only (scripts, modules, pages); pictures and data are never stops; one shared stylesheet at most
   const route = [];
-  if (entry && bestR > 1.5) {
-    const seen = new Set();
-    const walk = (id, depth, parent, n, how) => {
-      if (route.length >= 10 || seen.has(id) || depth > 5) return; seen.add(id);
+  const DATA = new Set(['other', 'image', 'media', 'font', 'markdown', 'json', 'yaml', 'toml', 'text', 'csv', 'data']);
+  const nInfo = (b, k) => (b.info && b.info[k] ? b.info[k].length : 0);
+  const scoreOf = (b) => nInfo(b, 'fns') * 2 + nInfo(b, 'cls') * 3 + nInfo(b, 'routes') * 3 + Math.log2((b.lines || 0) + 1) * 1.5 + Math.min(b.inDeg, 12) * 1.5 + Math.min(b.outDeg, 12) * 0.4 + (b === entry ? 100 : 0);
+  const logic = codeBs.filter((b) => b.lang && !DATA.has(b.lang) && !/\.min\./.test(b.path) && (b.lang !== 'css' || b.lines >= 150 || b.inDeg >= 3));
+  // pages that repeat one pattern (p/a/index.html, p/b/index.html, ...) become one stop
+  const groupKey = (b) => { if (b.folder || b.files > 1) return null; const parts = b.path.split('/'); if (parts.length < 3) return null; return parts.slice(0, -2).join('/') + '/*/' + parts[parts.length - 1]; };
+  const pGroups = new Map(); for (const b of logic) { const k = groupKey(b); if (k) { if (!pGroups.has(k)) pGroups.set(k, []); pGroups.get(k).push(b); } }
+  const repOf = new Map(), groupOf = new Map();
+  for (const [k, list] of pGroups) { if (list.length < 3) continue; const rep = list.slice().sort((a, b) => scoreOf(b) - scoreOf(a) || (a.path < b.path ? -1 : 1))[0]; for (const b of list) repOf.set(b.id, rep.id); groupOf.set(rep.id, { n: list.length, label: k.split('/*/')[0].split('/').pop() || k }); }
+  const tCand = logic.filter((b) => !repOf.has(b.id) || repOf.get(b.id) === b.id);
+  const sc = new Map(tCand.map((b) => [b.id, scoreOf(b) + (groupOf.has(b.id) ? 2 * Math.log2(groupOf.get(b.id).n) : 0)]));
+  let tPool = tCand.slice().sort((a, b) => sc.get(b.id) - sc.get(a.id) || a.id - b.id);
+  const tCss = tPool.filter((b) => b.lang === 'css'); tPool = tPool.filter((b) => b.lang !== 'css' || b === tCss[0]);
+  if (entry && tPool.length >= 2) {
+    const topSc = sc.get(tPool[0] === entry && tPool[1] ? tPool[1].id : tPool[0].id) || 1;
+    const stops = new Set(tPool.filter((b, i) => b === entry || (i < 10 && sc.get(b.id) >= topSc * 0.2)).slice(0, 10).map((b) => b.id));
+    stops.add(entry.id);
+    // walk outward from the entry, heaviest links first; a page in a group stands for its whole group
+    const toStop = (id) => (repOf.has(id) ? repOf.get(id) : id);
+    const parent = new Map([[entry.id, null]]), order = [entry.id], q = [entry.id];
+    while (q.length) { const c = q.shift(); for (const [d] of outs.get(c) || []) { const dd = toStop(d); if (parent.has(dd)) continue; parent.set(dd, c); order.push(dd); q.push(dd); } }
+    const seq = order.filter((id) => stops.has(id));
+    for (const b of tPool) if (stops.has(b.id) && !seq.includes(b.id)) seq.push(b.id);
+    const depthOf = new Map();
+    seq.forEach((id, i) => {
+      let from = null, how = 'start', hop = parent.has(id) ? parent.get(id) : undefined, direct = true;
+      if (id !== entry.id) {
+        if (hop === undefined) { from = seq[i - 1]; how = 'then'; }
+        else { while (hop != null && !stops.has(hop)) { hop = parent.get(hop); direct = false; } from = hop; how = direct ? (buildings[hop].lang === 'html' ? 'loads' : 'imports') : 'reaches'; }
+      }
+      const depth = from == null ? 0 : how === 'then' ? 0 : Math.min(4, (depthOf.get(from) || 0) + 1); depthOf.set(id, depth);
       const libs = (bLibs.get(id) || []).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([nm]) => nm);
-      route.push({ id, depth, from: parent, n, libs, how: parent == null ? 'start' : how === 'imports' && buildings[parent].lang === 'html' ? 'loads' : how });
-      for (const [d, w] of (outs.get(id) || []).slice(0, 4)) walk(d, depth + 1, id, w, 'imports');
-      for (const [d, w] of (serves.get(id) || []).slice(0, 3)) walk(d, depth + 1, id, w, 'serves');
-    };
-    walk(entry.id, 0, null, 0);
+      const st = { id, depth, from, n: 0, libs, how }; if (groupOf.has(id)) st.group = groupOf.get(id);
+      route.push(st);
+    });
   }
 
   // ---- history and people: rings of growth around the town, visitors at its edge, cranes on buildings with open issues
@@ -1773,16 +1827,16 @@ class TownView {
       if (st.from == null) continue;
       const a = P(st.from), b = P(st.id); const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2 - Math.hypot(b[0] - a[0], b[1] - a[1]) * 0.18;
       ctx.strokeStyle = 'rgba(251,245,232,0.9)'; ctx.lineWidth = 7; ctx.beginPath(); ctx.moveTo(...a); ctx.quadraticCurveTo(mx, my, ...b); ctx.stroke();
-      ctx.strokeStyle = PAL.coral; ctx.lineWidth = 3.5; if (st.how === 'serves') ctx.setLineDash([7, 5]); ctx.beginPath(); ctx.moveTo(...a); ctx.quadraticCurveTo(mx, my, ...b); ctx.stroke(); ctx.setLineDash([]);
+      ctx.strokeStyle = '#5E9C34'; ctx.lineWidth = 3.5; if (st.how === 'serves' || st.how === 'then' || st.how === 'reaches') ctx.setLineDash([7, 5]); ctx.beginPath(); ctx.moveTo(...a); ctx.quadraticCurveTo(mx, my, ...b); ctx.stroke(); ctx.setLineDash([]);
       // arrowhead near the destination
       const ang = Math.atan2(b[1] - my, b[0] - mx), ax = b[0] - Math.cos(ang) * 13, ay = b[1] - Math.sin(ang) * 13;
-      ctx.fillStyle = PAL.coral; ctx.beginPath(); ctx.moveTo(ax + Math.cos(ang) * 7, ay + Math.sin(ang) * 7); ctx.lineTo(ax + Math.cos(ang + 2.4) * 7, ay + Math.sin(ang + 2.4) * 7); ctx.lineTo(ax + Math.cos(ang - 2.4) * 7, ay + Math.sin(ang - 2.4) * 7); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#5E9C34'; ctx.beginPath(); ctx.moveTo(ax + Math.cos(ang) * 7, ay + Math.sin(ang) * 7); ctx.lineTo(ax + Math.cos(ang + 2.4) * 7, ay + Math.sin(ang + 2.4) * 7); ctx.lineTo(ax + Math.cos(ang - 2.4) * 7, ay + Math.sin(ang - 2.4) * 7); ctx.closePath(); ctx.fill();
     }
     // lines out to the libraries each stop uses
     for (const st of t.route) for (const lib of st.libs) { const c = t.clearings.find((x) => x.name === lib); if (!c) continue; const a = P(st.id), b = this.S(c.x, c.y); ctx.strokeStyle = PAL.coral; ctx.globalAlpha = 0.55; ctx.lineWidth = 2; ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke(); ctx.setLineDash([]); ctx.globalAlpha = 1; }
     t.route.forEach((st, i) => {
       const [x, y] = P(st.id); const r = 10;
-      ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fillStyle = this.routeStep === i ? PAL.ink : PAL.coral; ctx.fill(); ctx.strokeStyle = '#FBF5E8'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(x, y, r, 0, 7); ctx.fillStyle = this.routeStep === i ? PAL.ink : '#5E9C34'; ctx.fill(); ctx.strokeStyle = '#FBF5E8'; ctx.lineWidth = 2; ctx.stroke();
       ctx.fillStyle = '#fff'; ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(String(i + 1), x, y + 0.5);
     });
     ctx.restore();
@@ -2445,11 +2499,11 @@ class Town3D {
     for (const st of t.route || []) {
       if (st.from == null) continue;
       const A = t.buildings[st.from], B = t.buildings[st.id];
-      if (A.district === B.district) { ribbon([[A.x, A.y], [B.x, B.y]], st.how === 'serves'); continue; }
+      if (A.district === B.district) { ribbon([[A.x, A.y], [B.x, B.y]], (st.how === 'serves' || st.how === 'then' || st.how === 'reaches')); continue; }
       const s = (t.streets || []).find((q) => (q.a === A.district && q.c === B.district) || (q.a === B.district && q.c === A.district));
       if (!s || !s.path) { ribbon([[A.x, A.y], [B.x, B.y]], true); continue; }
       const path = (s.a === A.district ? s.path : s.path.slice().reverse()).map(([x, yy]) => [x + 0.5, yy + 0.5]);
-      ribbon([[A.x, A.y], path[0], ...path, [B.x, B.y]], st.how === 'serves');
+      ribbon([[A.x, A.y], path[0], ...path, [B.x, B.y]], (st.how === 'serves' || st.how === 'then' || st.how === 'reaches'));
     }
   }
 
@@ -3368,6 +3422,8 @@ class HexWorld {
   const $ = (s) => document.querySelector(s);
   const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const fmt = (n) => (n == null ? '–' : n >= 1e6 ? (n / 1e6).toFixed(1).replace(/\.0$/, '') + 'M' : n >= 1e4 ? Math.round(n / 1e3) + 'k' : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, '') + 'k' : String(n));
+  // generic file names (index.html, main.py, __init__.py) carry their folder so two of them can be told apart
+  const bname = (p) => { const parts = String(p).split('/'); const b = parts[parts.length - 1]; return parts.length > 1 && /^(index|main|__init__|__main__|mod|lib|app|init|readme)\.[a-z0-9]+$/i.test(b) ? parts[parts.length - 2] + '/' + b : b; };
   const STORE = 'githoods:v1';
   const LAYOUT = 4; // the layout the town builder produces now; towns older than MIN3D only have the street map until redrawn
   const MIN3D = 3;
@@ -3483,7 +3539,7 @@ class HexWorld {
   function showTown(t) {
     // towns from the old rectangle layout ask the map bot to rebuild them
     if (t.mode === 'code' && !(t.v >= 2) && !t._rebuildAsked) { t._rebuildAsked = true; sendToMap(t.key, null); }
-    if (state.current !== t) { state.tour = null; for (const v of allViews()) { v.showRoute = false; v.routeStep = null; } findBox.value = ''; state.find = { hits: [], idx: -1 }; renderFind(); }
+    if (state.current !== t) { state.tour = null; $('#tour-pop').hidden = true; for (const v of allViews()) { v.showRoute = false; v.routeStep = null; } findBox.value = ''; state.find = { hits: [], idx: -1 }; renderFind(); }
     const hubKey = Object.keys(state.owners).find((l) => l.toLowerCase() === String(t.key).split('/')[0].toLowerCase()); if (hubKey) state.hub = hubKey;
     state.current = t; for (const v of allViews()) v.setTown(t); setTab('town'); renderSummary(t);
     $('#q').value = t.key; history.replaceState(null, '', '#' + t.key);
@@ -3559,10 +3615,27 @@ class HexWorld {
     return `<div class="langbar">${items.map(([n, v]) => `<span style="flex:${v};background:${langColor(key(n))}" title="${esc(n)} ${(100 * v / tot).toFixed(1)}%"></span>`).join('')}</div>
       <div class="langkey">${items.map(([n, v]) => `<span><i style="background:${langColor(key(n))}"></i>${esc(n)} ${(100 * v / tot).toFixed(0)}%</span>`).join('')}</div>`;
   }
+  // the hood panel is four tabs: Overview, Tour, File, Connections
+  function setPanes(on) { const a = $('aside'); if (on) { a.dataset.ptab = a.dataset.ptab || 'overview'; } else delete a.dataset.ptab; syncPtabs(); }
+  function setPtab(k) { const a = $('aside'); if (!a.dataset.ptab) return; a.dataset.ptab = k; syncPtabs(); }
+  function syncPtabs() {
+    const a = $('aside'), k = a.dataset.ptab; for (const b of document.querySelectorAll('#ptabs button')) b.setAttribute('aria-selected', String(b.dataset.ptab === k));
+    const ins = $('#inspector'); if (state.tour == null) ins.dataset.pane = 'file';
+    const hint = $('#file-hint'); if (hint) hint.hidden = !!ins.innerHTML.trim();
+  }
+  function stopName(t, st) { const b = t.buildings[st.id]; if (st.group) { const lab = st.group.label === 'p' ? 'Project pages' : st.group.label.replace(/[-_]/g, ' ').replace(/^./, (c) => c.toUpperCase()) + ' pages'; return `${lab} (${st.group.n})`; } return bname(b.path); }
+  function stopHow(t, st) {
+    const b = t.buildings[st.id], par = st.from != null ? bname(t.buildings[st.from].path) : '';
+    const eg = st.group ? ` · e.g. ${b.path}` : '';
+    if (st.from == null) return 'Starts here' + eg;
+    if (st.how === 'then') return 'core file, not reached from the start' + eg;
+    if (st.how === 'reaches') return `reached from ${par} through other files` + eg;
+    return `${par} ${st.how === 'imports' ? 'imports' : st.how === 'serves' ? 'serves' : 'loads'} ${st.group ? 'them' : 'it'}` + eg;
+  }
   function renderSummary(t) {
     const s = t.stats || {}; const a = t.archetype || { name: '', traits: [] };
     const stat = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
-    let html = `<h2><a href="https://github.com/${esc(t.key)}" target="_blank" rel="noopener">${esc(t.key)}</a></h2>
+    let html = `<section class="pane" data-pane="overview"><h2><a href="https://github.com/${esc(t.key)}" target="_blank" rel="noopener">${esc(t.key)}</a></h2>
       <p class="arch"><b>${esc(a.name)}</b>${a.traits && a.traits.length ? ' · ' + a.traits.map(esc).join(' · ') : ''}</p>
       ${s.description ? `<p class="desc">${esc(s.description)}</p>` : ''}
       <dl class="stats">${stat('Files', fmt(s.files))}${stat('Lines', fmt(s.lines))}${stat('Imports', fmt(s.imports))}${stat('Stars', fmt(s.stars))}${stat('Commits', fmt(s.commits))}${stat('Contributors', fmt(s.contributors))}</dl>
@@ -3571,34 +3644,41 @@ class HexWorld {
     html += t.public ? `<p class="pub">On the public map${t.builtAt ? ` · built ${new Date(t.builtAt).toISOString().slice(0, 10)}` : ''}</p>`
       : t.queued ? `<p class="pub">Sent to the public map. It shows up for everyone in a few minutes.</p>`
       : req ? `<p class="pub local">Only in your browser. <a class="btn small" href="${esc(req)}" target="_blank" rel="noopener">Add to public map</a></p><p class="muted small">Opens a GitHub issue. The map bot rebuilds the hood from GitHub and adds it for everyone.</p>` : `<p class="pub local">Only in your browser.</p>`;
+    html += '</section>';
+    let tourHtml = '';
     if (t.mode === 'code' && t.route && t.route.length > 1) {
-      const verb = { start: 'Starts here', imports: 'imports', loads: 'loads', serves: 'serves' };
-      html += `<h3>Main route</h3>
+      tourHtml = `<h3>The tour <small class="muted">the files that do the work</small></h3>
         <button class="btn small" id="route-toggle">${state.tour != null ? 'End tour' : 'Take the tour'}</button>
-        <ol class="route">${t.route.map((st, i) => { const b = t.buildings[st.id]; const par = st.from != null ? basename(t.buildings[st.from].path) : ''; return `<li style="margin-left:${Math.min(st.depth, 4) * 12}px"><button class="link" data-step="${i}">${esc(basename(b.path))}</button> <span class="muted">${st.from == null ? verb.start : `${par} ${verb[st.how] || st.how} it`}</span>${st.libs.length ? `<br><em>uses ${st.libs.map(esc).join(', ')}</em>` : ''}${b.info && b.info.doc ? `<br><span class="muted small">${esc(b.info.doc.slice(0, 110))}${b.info.doc.length > 110 ? '…' : ''}</span>` : ''}</li>`; }).join('')}</ol>`;
-    }
+        <ol class="route">${t.route.map((st, i) => { const b = t.buildings[st.id]; return `<li style="margin-left:${Math.min(st.depth, 4) * 12}px"><button class="link" data-step="${i}">${esc(stopName(t, st))}</button> <span class="muted">${esc(stopHow(t, st))}</span>${st.libs.length ? `<br><em>uses ${st.libs.map(esc).join(', ')}</em>` : ''}${b.info && b.info.doc ? `<br><span class="muted small">${esc(b.info.doc.slice(0, 110))}${b.info.doc.length > 110 ? '…' : ''}</span>` : ''}</li>`; }).join('')}</ol>`;
+    } else if (t.mode === 'code') tourHtml = '<p class="muted">No tour for this hood: no file was found that leads into the rest.</p>';
+    html += `<section class="pane" data-pane="tour">${tourHtml}</section>`;
     if (t.mode === 'code') {
+      html += '<section class="pane" data-pane="conn">';
       if (t.v >= 4) {
-        const dn = (id) => { const d = t.districts.find((x) => x.id === id); return d ? (d.civic ? 'Civic center' : d.label) : ''; };
-        html += `<h3>Wires</h3><ul class="list">${(t.wires || []).slice(0, 10).map(([a, c, n]) => `<li><span>${esc(dn(a))} <em>and</em> ${esc(dn(c))}</span><b>${n}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
-        <h3>Libraries (gates)</h3><ul class="list">${t.clearings.map((c) => `<li><span>${esc(c.name)}${c.label ? ` <em>${esc(c.label)}</em>` : ''}</span><b>${c.uses}</b></li>`).join('') || '<li class="muted">None.</li>'}</ul>`;
+        const bn = (id) => (t.buildings[id] ? bname(t.buildings[id].path) : '?');
+        const wl = (t.wires || []).slice().sort((x, y) => y[2] - x[2]).slice(0, 15);
+        html += `<h3>Wires <small class="muted">busiest file links</small></h3><ul class="list wraps">${wl.map(([a, c, n]) => `<li><span><button class="link" data-bid="${a}">${esc(bn(a))}</button> <em>and</em> <button class="link" data-bid="${c}">${esc(bn(c))}</button></span><b>${n}</b></li>`).join('') || '<li class="muted">No links between files found.</li>'}</ul>${(t.wires || []).length > 15 ? `<p class="muted small">${t.wires.length} wires in all. Tap a building to see its own.</p>` : ''}
+        <h3>Outside libraries <small class="muted">gates</small></h3><ul class="list">${t.clearings.map((c) => `<li><span>${esc(c.name)}${c.label ? ` <em>${esc(c.label)}</em>` : ''}</span><b>${c.uses}</b></li>`).join('') || '<li class="muted">None.</li>'}</ul>`;
       } else {
-            html += `<h3>${t.v >= MIN3D ? 'Roads' : 'Streets'}</h3><ul class="list">${t.streets.filter((st) => !st.empty).slice(0, 10).map((st) => `<li><span title="${esc((st.carries || []).map((c) => c.path).join(', '))}">${esc(st.name)}${(st.carries || []).length ? ` <em>${esc(st.carries.map((c) => basename(c.path)).join(', '))}</em>` : ''}</span><b>${st.traffic}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
+            html += `<h3>${t.v >= MIN3D ? 'Roads' : 'Streets'}</h3><ul class="list">${t.streets.filter((st) => !st.empty).slice(0, 10).map((st) => `<li><span title="${esc((st.carries || []).map((c) => c.path).join(', '))}">${esc(st.name)}${(st.carries || []).length ? ` <em>${esc(st.carries.map((c) => bname(c.path)).join(', '))}</em>` : ''}</span><b>${st.traffic}</b></li>`).join('') || '<li class="muted">No cross-district imports found.</li>'}</ul>
         <h3>${t.v >= MIN3D ? 'Terminals' : 'Outside the walls'}</h3><ul class="list">${t.clearings.map((c) => `<li><span>${esc(c.name)}${c.label ? ` <em>${esc(c.label)}</em>` : ''}${c.trail ? ' <em>build trail</em>' : ''}</span><b>${c.uses}</b></li>`).join('') || '<li class="muted">None.</li>'}</ul>`;
       }
+      html += '</section>';
     } else {
       html += `<h3>Grid</h3>
         <ul class="list">${t.grid.cols.slice(0, 12).map((c) => `<li><span>${esc(c.name)}</span><b>${c.n}</b></li>`).join('')}</ul>`;
     }
-    if (t.mode === 'code' && t.order != null && !(t.v >= MIN3D)) html += `<h3>Street plan</h3><p class="muted">${t.order > 0.6 ? 'Planned grid' : t.order > 0.3 ? 'Partly planned' : 'Winding old hood'} (order ${t.order.toFixed(2)}). Even folder depths and file sizes make a grid; uneven ones make winding streets.</p>`;
-    html += `<h3>History</h3><p class="muted">${t.rings} ring${t.rings === 1 ? '' : 's'} of growth (commits), ${t.visitors.length} visitor${t.visitors.length === 1 ? '' : 's'} (stars), ${t.cranes.length} crane${t.cranes.length === 1 ? '' : 's'} (open issues)${s.created ? `, founded ${esc(s.created.slice(0, 10))}` : ''}.</p>`;
+    if (t.mode === 'code' && t.order != null && !(t.v >= MIN3D)) html += `<section class="pane" data-pane="conn"><h3>Street plan</h3><p class="muted">${t.order > 0.6 ? 'Planned grid' : t.order > 0.3 ? 'Partly planned' : 'Winding old hood'} (order ${t.order.toFixed(2)}). Even folder depths and file sizes make a grid; uneven ones make winding streets.</p></section>`;
+    html += `<section class="pane" data-pane="overview"><h3>History</h3><p class="muted">${t.rings} ring${t.rings === 1 ? '' : 's'} of growth (commits), ${t.visitors.length} visitor${t.visitors.length === 1 ? '' : 's'} (stars), ${t.cranes.length} crane${t.cranes.length === 1 ? '' : 's'} (open issues)${s.created ? `, founded ${esc(s.created.slice(0, 10))}` : ''}.</p>`;
     if (t.notes && t.notes.length) html += `<p class="note">${t.notes.map(esc).join('<br>')}</p>`;
-    $('#summary').innerHTML = html;
+    html += '</section>';
+    $('#summary').innerHTML = html; setPanes(t.mode === 'code');
     if (!tv().pinned) $('#inspector').innerHTML = '';
   }
   function renderInspector(hit, pinned) {
     if (state.tour != null && !pinned) { renderTour(); return; }
-    const el = $('#inspector'); if (!hit) { el.innerHTML = ''; return; }
+    const el = $('#inspector'); if (!hit) { el.innerHTML = ''; syncPtabs(); return; }
+    if (pinned) setPtab('file');
     const t = state.current; let h = '';
     if (hit.type === 'building') {
       const b = hit.b;
@@ -3612,7 +3692,7 @@ class HexWorld {
         const chips = (title, list, cls) => (list && list.length ? `<h5>${title} <small>${list.length}</small></h5><div class="chips ${cls || ''}">${list.map((x) => `<span>${esc(x)}</span>`).join('')}</div>` : '');
         if (info) { h += chips(info.routes && info.routes.length ? 'Routes it serves' : '', info.routes, 'mono'); h += chips(b.lang === 'sql' ? 'Tables and views' : 'Classes', info.cls); h += chips(b.lang === 'sql' ? 'Functions, triggers and policies' : 'Functions', info.fns, 'mono'); if (info.main) h += `<p class="muted small">Runs on its own (has a main entry).</p>`; }
         if (t && t._out) {
-          const names = (list) => (list || []).slice().sort((x, y) => y[1] - x[1]).slice(0, 12).map(([id, n]) => `<button class="link chip-link" data-bid="${id}">${esc(basename(t.buildings[id].path))}${n > 1 ? ` ×${n}` : ''}</button>`).join('');
+          const names = (list) => (list || []).slice().sort((x, y) => y[1] - x[1]).slice(0, 12).map(([id, n]) => `<button class="link chip-link" data-bid="${id}">${esc(bname(t.buildings[id].path))}${n > 1 ? ` ×${n}` : ''}</button>`).join('');
           const uses = t._out.get(b.id), usedBy = t._in.get(b.id);
           const libs = (t.clearings || []).filter((c) => (c.users || []).includes(b.id)).map((c) => c.name);
           if (uses && uses.length) h += `<h5>Uses</h5><div class="chips">${names(uses)}</div>`;
@@ -3627,36 +3707,43 @@ class HexWorld {
     } else if (hit.type === 'clearing') {
       const c = hit.c; h = `<h4>${esc(c.name)}</h4><p><b>${c.label ? esc(c.label) : 'Outside library'}</b>${c.std ? ' · standard library' : ''}${c.trail ? ' · build or dev only' : ''}</p><p>${c.uses} import${c.uses === 1 ? '' : 's'} from this town.</p><p><button class="btn small" data-lib="${esc(c.name)}">Show on the world map</button></p>`;
     }
-    el.innerHTML = h;
+    el.innerHTML = h; el.dataset.pane = 'file'; syncPtabs();
   }
   /* ---------- guided tour of the main route ---------- */
   function renderTour() {
     const t = state.current, i = state.tour, el = $('#inspector'); if (i == null || !t || !t.route) return;
     const st = t.route[i], b = t.buildings[st.id], info = b.info || {}, n = t.route.length;
     const verb = { imports: 'imports', loads: 'loads', serves: 'serves' };
-    const how = st.from == null ? 'The route starts here' : `${esc(basename(t.buildings[st.from].path))} ${verb[st.how] || esc(st.how)} this file`;
+    const how = esc(stopHow(t, st).replace(/^Starts here/, 'The tour starts here'));
     const what = b.landmark ? `${b.landmark.label} (uses ${b.landmark.lib})` : b.special ? SPECIAL_LABEL[b.special] : KIND_LABEL[b.kind] || b.kind;
-    const names = (list) => (list || []).slice().sort((x, y) => y[1] - x[1]).slice(0, 8).map(([id, c]) => `<button class="link chip-link" data-bid="${id}">${esc(basename(t.buildings[id].path))}${c > 1 ? ` ×${c}` : ''}</button>`).join('');
+    const names = (list) => (list || []).slice().sort((x, y) => y[1] - x[1]).slice(0, 8).map(([id, c]) => `<button class="link chip-link" data-bid="${id}">${esc(bname(t.buildings[id].path))}${c > 1 ? ` ×${c}` : ''}</button>`).join('');
     const uses = t._out && t._out.get(b.id), usedBy = t._in && t._in.get(b.id);
     const fns = [...(info.routes || []), ...(info.fns || [])].slice(0, 10);
     const next = t.route[i + 1];
-    el.innerHTML = `<h4>Stop ${i + 1} of ${n} · ${esc(basename(b.path))}</h4><p class="muted">${esc(what)}. ${how}.</p>`
+    el.dataset.pane = 'tour';
+    el.innerHTML = `<h4>Stop ${i + 1} of ${n} · ${esc(stopName(t, st))}</h4>${st.group ? `<p class="path">${esc(b.path)}</p>` : ''}<p class="muted">${esc(what)}. ${how}.</p>`
       + (info.doc ? `<p class="doc">${esc(info.doc)}</p>` : '')
       + (fns.length ? `<h5>What it does <small>functions</small></h5><div class="chips mono">${fns.map((f) => `<span>${esc(f)}</span>`).join('')}</div>` : '')
       + (uses && uses.length ? `<h5>Calls into <small>${t.v >= 4 ? 'gold wires' : 'ink lines'} on the map</small></h5><div class="chips">${names(uses)}</div>` : '')
       + (usedBy && usedBy.length ? `<h5>Used by <small>${t.v >= 4 ? 'teal wires' : 'teal lines'} on the map</small></h5><div class="chips coral">${names(usedBy)}</div>` : '')
-      + (next ? `<p class="muted small">Next: ${esc(basename(t.buildings[next.id].path))}</p>` : '<p class="muted small">End of the route.</p>')
+      + (next ? `<p class="muted small">Next: ${esc(stopName(t, next))}</p>` : '<p class="muted small">End of the tour.</p>')
       + `<div class="tour-nav"><button class="ghost" data-tour="prev"${i ? '' : ' disabled'}>‹ Back</button><button class="ghost" data-tour="next"${next ? '' : ' disabled'}>Next ›</button><button class="ghost" data-tour="end">End</button></div>`;
+    // a small card over the map: where you are, one line on what this file does, and the buttons
+    const pop = $('#tour-pop'); const fname = b.path.split('/').pop(); let doc = info.doc || ''; const at = doc.indexOf(fname); if (at >= 0 && at < 70) doc = doc.slice(at + fname.length).replace(/^[\s\u2014:·-]+/, '');
+    let line = doc ? doc.split(/(?<=[.!?])\s/)[0] : what; const cut = line.length > 140 || (doc && line.length < doc.length); if (line.length > 140) line = line.slice(0, 140); if (cut) line = line.replace(/[\s.,;:]+$/, '');
+    pop.innerHTML = `<div class="tp-head"><b>${i + 1}/${n}</b> <span>${esc(stopName(t, st))}</span></div><p class="tp-how">${how}</p><p class="tp-doc">${esc(line)}${cut ? '…' : ''}</p>`
+      + `<div class="tp-nav"><button class="ghost" data-tour="prev"${i ? '' : ' disabled'} aria-label="Previous stop">‹</button><button class="ghost" data-tour="next"${next ? '' : ' disabled'}>${next ? 'Next ›' : 'Last stop'}</button><button class="ghost" data-tour="end" aria-label="End tour">✕</button></div>`;
+    pop.hidden = false;
   }
   function goStep(i) {
     const t = state.current; if (!t || !t.route || !t.route.length) return;
     i = Math.max(0, Math.min(t.route.length - 1, i)); state.tour = i;
     for (const v of allViews()) { v.showRoute = true; v.routeStep = i; v.pinned = null; v.hover = null; }
-    tv().focusBuilding(t.buildings[t.route[i].id], 40); tv().draw(); renderTour(); renderSummary(t); showMap();
+    tv().focusBuilding(t.buildings[t.route[i].id], 40); tv().draw(); renderTour(); renderSummary(t); setPtab('tour'); showMap();
   }
   function endTour() {
-    state.tour = null; for (const v of allViews()) { v.showRoute = false; v.routeStep = null; v.pinned = null; v.hover = null; }
-    $('#inspector').innerHTML = ''; tv().draw(); tv().fit(); if (state.current) renderSummary(state.current);
+    state.tour = null; $('#tour-pop').hidden = true; for (const v of allViews()) { v.showRoute = false; v.routeStep = null; v.pinned = null; v.hover = null; }
+    $('#inspector').innerHTML = ''; tv().draw(); tv().fit(); if (state.current) renderSummary(state.current); syncPtabs();
   }
   function renderWorldPanel(L) {
     const owners = Object.values(state.owners); const links = worldView.links || [];
@@ -3675,12 +3762,12 @@ class HexWorld {
         <h3>Hubs</h3><ul class="list">${owners.slice().sort((a, b) => b.repos.length - a.repos.length).map((o) => `<li><button class="link" data-nation="${esc(o.login)}"><i class="sw" style="background:${worldView.colorOf(o.login)}"></i>${esc(o.login)}</button><b>${o.repos.length}</b></li>`).join('')}</ul>
         ${links.length ? `<h3>Infrastructure</h3><ul class="list">${links.map((l) => `<li><span>${esc(l.a)} ↔ ${esc(l.b)}</span><b>${esc(l.why.join(', '))}</b></li>`).join('')}</ul>` : ''}`;
     }
-    $('#summary').innerHTML = h; $('#inspector').innerHTML = '';
+    $('#summary').innerHTML = h; $('#inspector').innerHTML = ''; setPanes(false);
   }
   function renderLibPanel(L) {
     if (!L) { renderWorldPanel(worldView.level); return; }
     const rows = L.hoods.map((k) => state.towns[k]).filter(Boolean).slice(0, 40).map((t) => `<li><span><button data-open="${esc(t.owner + '/' + t.repo)}" class="linkish">${esc(t.owner + '/' + t.repo)}</button></span></li>`).join('');
-    $('#summary').innerHTML = `<h2>${esc(L.name)}</h2><p class="arch"><b>Library</b> · shared by ${L.n} hoods</p><h3>Used by</h3><ul class="list">${rows}</ul>`; $('#inspector').innerHTML = '';
+    $('#summary').innerHTML = `<h2>${esc(L.name)}</h2><p class="arch"><b>Library</b> · shared by ${L.n} hoods</p><h3>Used by</h3><ul class="list">${rows}</ul>`; $('#inspector').innerHTML = ''; setPanes(false);
   }
   function renderWorldHover(hh) {
     const el = $('#inspector'); if (!hh) { el.innerHTML = ''; return; }
@@ -3704,7 +3791,7 @@ class HexWorld {
   const showMap = () => { if (window.innerWidth <= 820) document.querySelector('.stage').scrollIntoView({ behavior: 'smooth', block: 'start' }); };
   const findBox = $('#find');
   function findHits(t, q) {
-    return t.buildings.map((b) => { const p = b.path.toLowerCase(), n = basename(p); const fn = b.info ? [...(b.info.fns || []), ...(b.info.cls || []), ...(b.info.routes || [])].find((x) => x.toLowerCase().includes(q)) : null; const score = n === q ? 0 : n.startsWith(q) ? 1 : n.includes(q) ? 2 : p.includes(q) ? 3 : fn ? 4 : 9; return { b, score, fn }; })
+    return t.buildings.map((b) => { const p = b.path.toLowerCase(), n = bname(p); const fn = b.info ? [...(b.info.fns || []), ...(b.info.cls || []), ...(b.info.routes || [])].find((x) => x.toLowerCase().includes(q)) : null; const score = n === q ? 0 : n.startsWith(q) ? 1 : n.includes(q) ? 2 : p.includes(q) ? 3 : fn ? 4 : 9; return { b, score, fn }; })
       .filter((x) => x.score < 9).sort((a, c) => a.score - c.score || a.b.path.length - c.b.path.length || (a.b.path < c.b.path ? -1 : 1));
   }
   function renderFind() {
@@ -3728,6 +3815,7 @@ class HexWorld {
   $('#find-next').onclick = () => step(1); $('#find-prev').onclick = () => step(-1);
   $('#find-clear').onclick = () => { findBox.value = ''; state.find = { hits: [], idx: -1 }; renderFind(); applyFind(false); tv().fit(); };
   document.addEventListener('click', (e) => {
+    const pt = e.target.closest('#ptabs button'); if (pt) { setPtab(pt.dataset.ptab); return; }
     const bb = e.target.closest('[data-bid]');
     if (bb && state.current) { const b = state.current.buildings[+bb.dataset.bid]; if (b) { if (bb.dataset.hit != null) { state.find.idx = +bb.dataset.hit; renderFind(); } tv().focusBuilding(b, 60); showMap(); } return; }
     if (e.target.closest('#route-toggle')) { if (state.tour != null) endTour(); else goStep(0); return; }
