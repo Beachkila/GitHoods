@@ -71,7 +71,7 @@ body[data-tab="world"] .find-wrap,body[data-tab="hub"] .find-wrap{display:none}
 .chips span,.chips .chip-link{font-size:12px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:1px 8px;color:var(--ink);text-decoration:none}
 .chips.mono span{font-family:ui-monospace,Menlo,monospace;font-size:11px}
 .chips .chip-link{color:var(--accent)}
-.chips.coral .chip-link{border-color:#E8735A66}
+.chips.coral .chip-link{border-color:#1E9E9666}
 .route{margin:8px 0 0;padding-left:20px}
 .route li{margin:6px 0;font-size:13px}
 .route em{font-style:normal;color:var(--accent);font-size:12px}
@@ -110,9 +110,9 @@ body[data-view="3d"] #town-canvas{display:none} body[data-tab="world"] #town-3d,
 .l3.street{font-size:9.5px;color:#55534E;letter-spacing:.08em}
 .l3.file{text-transform:none;letter-spacing:0;font-weight:600;font-size:10.5px;line-height:15px;color:#2E2E2C;background:#FFFFFFE8;border:1px solid #D2CFC6;border-radius:4px;padding:0 6px;text-shadow:none;box-shadow:0 1px 2px #0000001A}
 .l3.file{overflow:visible}.l3.file::after{content:'';position:absolute;left:var(--lx,0);top:100%;width:1px;height:var(--ly,10px);background:#8A867C}
-.l3.file.hot{color:#fff;background:#C0432C;border-color:#C0432C}
+.l3.file.hot{color:#fff;background:#2E2E2C;border-color:#2E2E2C}
 .tour-nav{display:flex;gap:6px;margin-top:8px} .tour-nav button{flex:1}
-.l3.stop{width:20px;height:20px;border-radius:50%;background:#C0432C;color:#fff;text-align:center;letter-spacing:0;text-shadow:none;font:700 11px/20px system-ui,sans-serif}
+.l3.stop{width:20px;height:20px;border-radius:50%;background:#5E9C34;color:#fff;text-align:center;letter-spacing:0;text-shadow:none;font:700 11px/20px system-ui,sans-serif}
 .l3.stop.now{background:#2E2E2C}
 .redraw{position:absolute;left:12px;right:12px;top:12px;display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between;background:#FBF6EC;color:#3B2A1A;border:1px solid #CDBB98;border-radius:8px;padding:8px 10px;font-size:13px;z-index:2}
 .redraw[hidden]{display:none}
@@ -286,6 +286,7 @@ function parseImports(lang, path, text) {
   } else if (lang === 'html') {
     const re = /<script[^>]+src=["']([^"']+)["']|<link[^>]+href=["']([^"']+\.css[^"']*)["']/gi;
     while ((m = re.exec(text))) add(m[1] || m[2]);
+    refsOf(text, add);
     const re2 = /<script[^>]*>([\s\S]*?)<\/script>/gi; // inline module imports
     while ((m = re2.exec(text))) {
       const r3 = /import\s[^'"`;]*?from\s*['"]([^'"]+)['"]/g; let k;
@@ -335,8 +336,44 @@ function parseImports(lang, path, text) {
   } else if (lang === 'css') {
     const re = /@import\s+(?:url\()?['"]?([^'")\s;]+)/g;
     while ((m = re.exec(text))) add(m[1]);
+    urlsOf(text, add);
+  } else if (lang === 'markdown') {
+    refsOf(text, add);
+    const md = /!?\[[^\]]*\]\(\s*<?([^)\s>]+)/g; // [text](path) and ![alt](path)
+    while ((m = md.exec(text))) addLocal(m[1], add);
+    const refd = /^[ \t]{0,3}\[[^\]]+\]:\s*<?(\S+)/gm; // [id]: path
+    while ((m = refd.exec(text))) addLocal(m[1], add);
   }
   return out;
+}
+
+// a reference counts only when it names a file inside the repo: no web addresses, no anchors, no data URIs
+function addLocal(spec, add) {
+  if (!spec) return;
+  let v = String(spec).trim().replace(/^<|>$/g, '').split('#')[0].split('?')[0];
+  if (!v || /^(?:[a-z][a-z0-9+.-]*:|\/\/)/i.test(v) || /[\s{}$]/.test(v) || v.length > 300) return;
+  try { v = decodeURIComponent(v); } catch (e) { /* keep as written */ }
+  if (!v.startsWith('.') && !v.startsWith('/')) v = './' + v;
+  add(v);
+}
+// pictures, media, links and other files an HTML page points at
+function refsOf(text, add) {
+  let m;
+  const attr = /<(?:img|source|video|audio|track|embed|iframe|input)\b[^>]*?\b(?:src|poster)=["']([^"']+)["']/gi;
+  while ((m = attr.exec(text))) addLocal(m[1], add);
+  const srcset = /\bsrcset=["']([^"']+)["']/gi;
+  while ((m = srcset.exec(text))) m[1].split(',').forEach((c) => addLocal(c.trim().split(/\s+/)[0], add));
+  const objd = /<object\b[^>]*?\bdata=["']([^"']+)["']/gi;
+  while ((m = objd.exec(text))) addLocal(m[1], add);
+  const a = /<a\b[^>]*?\bhref=["']([^"']+)["']/gi;
+  while ((m = a.exec(text))) addLocal(m[1], add);
+  const lk = /<link\b[^>]*?\bhref=["']([^"']+)["']/gi;
+  while ((m = lk.exec(text))) addLocal(m[1], add);
+  urlsOf(text, add);
+}
+function urlsOf(text, add) {
+  const u = /url\(\s*['"]?([^'")\s]+)['"]?\s*\)/gi; let m;
+  while ((m = u.exec(text))) addLocal(m[1], add);
 }
 
 const ROUTE_RE = /@(?:app|router|bp|api)\.(?:get|post|put|delete|patch|route)\(|\b(?:app|router)\.(?:get|post|put|delete|patch)\(\s*['"`]|HandleFunc\(|\.path\s*==\s*['"]|@(?:Get|Post|Put|Delete)Mapping/g;
@@ -481,6 +518,10 @@ async function scanRepo(owner, repo, onProgress = () => {}) {
   const manifestsFirst = wanted.filter((b) => isManifest(b.p)).concat(wanted.filter((b) => !isManifest(b.p)));
   for (const b of manifestsFirst) { if (pick.length >= FILE_CAP || bytes + b.s > BYTE_CAP) break; pick.push(b); bytes += b.s; }
   const readme = blobs.find((b) => /^readme(\.md|\.markdown|\.rst|\.txt)?$/i.test(b.p));
+  // markdown pages are read too, only for the files they link to or show
+  const mdWanted = blobs.filter((b) => /\.(md|markdown)$/i.test(b.p) && b.s < 90000 && b !== readme && !/(^|\/)(node_modules|vendor|dist|build|\.git)\//.test(b.p))
+    .sort((a, b) => (a.p.split('/').length - b.p.split('/').length) || (a.p < b.p ? -1 : 1)).slice(0, 60);
+  for (const b of mdWanted) pick.push(b);
   if (readme) pick.push(readme);
 
   const files = {}; // path -> {lang, imp, m}
@@ -491,8 +532,9 @@ async function scanRepo(owner, repo, onProgress = () => {}) {
     done++;
     if (done % 20 === 0 || done === pick.length) onProgress(`Reading files ${done} of ${pick.length}`);
     if (text == null) return;
-    if (b === readme) { readmeText = text.slice(0, 150000); return; }
+    if (b === readme) { readmeText = text.slice(0, 150000); if (/\.(md|markdown)$/i.test(b.p)) files[b.p] = { lang: 'markdown', imp: parseImports('markdown', b.p, text), m: fileMetrics(text), d: {} }; return; }
     const name = b.p.split('/').pop();
+    if (/\.(md|markdown)$/i.test(b.p) && !CODE_EXT[extOf(b.p)]) { files[b.p] = { lang: 'markdown', imp: parseImports('markdown', b.p, text), m: fileMetrics(text), d: {} }; return; }
     if (isManifest(b.p)) { manifests.push({ path: b.p, ...parseManifest(name, text) }); if (!CODE_EXT[extOf(b.p)]) return; }
     const lang = CODE_EXT[extOf(b.p)];
     if (!lang) return;
@@ -658,11 +700,11 @@ function makeResolver(scan, pathSet) {
 
   function resolve(from, lang, spec) {
     const dir = dirname(from);
-    if (lang === 'javascript' || lang === 'typescript' || lang === 'html' || lang === 'css') {
+    if (lang === 'javascript' || lang === 'typescript' || lang === 'html' || lang === 'css' || lang === 'markdown') {
       // Deno and bundler aliases name the same package as a plain import: npm:@supabase/supabase-js@2 -> @supabase/supabase-js
       if (/^(npm|jsr):/.test(spec)) { const s2 = spec.replace(/^(npm|jsr):\/?/, ''); let nm = s2.startsWith('@') ? s2.split('/').slice(0, 2).join('/') : s2.split('/')[0]; nm = nm.replace(/(.)@[^/]*$/, '$1'); return nm ? { ext: nm } : null; }
       if (/^https?:\/\//.test(spec) || spec.startsWith('//')) { const n = cdnName(spec.startsWith('//') ? 'https:' + spec : spec); return n ? { ext: n.replace(/\.min$/, '') } : null; }
-      if (spec.startsWith('.') || spec.startsWith('/') || (lang === 'html' || lang === 'css') && !spec.includes(':')) {
+      if (spec.startsWith('.') || spec.startsWith('/') || (lang === 'html' || lang === 'css' || lang === 'markdown') && !spec.includes(':')) {
         const base = spec.startsWith('/') ? spec.slice(1) : joinPath(dir, spec.split('?')[0]);
         const hit = jsLocal(base);
         return hit ? { int: hit } : null;
@@ -803,7 +845,7 @@ function packShelves(bs, rect, gap) {
 function buildTown(scan) {
   const notes = [];
   const files = scan.files || {};
-  const codeFileCount = Object.values(files).filter((f) => !['html', 'css'].includes(f.lang)).length;
+  const codeFileCount = Object.values(files).filter((f) => !['html', 'css', 'markdown'].includes(f.lang)).length;
   if (scan.readme && codeFileCount <= 3) {
     const lt = buildListTown(scan);
     if (lt) return lt;
@@ -1204,7 +1246,7 @@ function buildTown(scan) {
 
   // ---- wires: one for every pair of files that import each other, heavier with more imports
   const wmap = new Map(); for (const [k, n] of edges) { const [a, c] = k.split('>').map(Number); if (a === c) continue; const kk = Math.min(a, c) + '|' + Math.max(a, c); wmap.set(kk, (wmap.get(kk) || 0) + n); }
-  const wiresOut = [...wmap.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).slice(0, 700).map(([kk, n]) => { const [a, c] = kk.split('|').map(Number); return [a, c, n]; });
+  const wiresOut = [...wmap.entries()].sort((x, y) => y[1] - x[1] || (x[0] < y[0] ? -1 : 1)).slice(0, 4000).map(([kk, n]) => { const [a, c] = kk.split('|').map(Number); return [a, c, n]; });
   const streets = [], roads = [];
   const edgeList = [...edges.entries()].map(([k, n]) => { const [a, c] = k.split('>').map(Number); return [buildings[a], buildings[c], n]; });
 
@@ -1316,7 +1358,7 @@ function classify({ districts, buildings, scan, edges, streets }) {
   if (edges.size === 0 && nonCivic.length) traits.push('no internal roads');
   if (langsUsed >= 4) traits.push('multilingual');
   if (scan.meta.archived) traits.push('ruins');
-  if (buildings.some((b) => b.kind === 'yard')) traits.push('walled');
+  if (buildings.some((b) => b.kind === 'yard')) traits.push('has tests');
   return { name: core, traits };
 }
 
@@ -1921,7 +1963,7 @@ const AX = {
   paper: 0xEFEEEA, ground: 0xE8E9E2, outside: 0xE1E5D8, slabSide: 0xD3D1CA, pave: 0xF7F6F2, paveEdge: 0xC9C7C0,
   road: 0xBDB9B1, roadEdge: 0xAFABA3, mark: 0xFAFAF8, wall: 0xF4F3F0, glass: 0xE3E9EA, glassDark: 0xC7D1D4, roof: 0xECEBE7,
   steel: 0xC2C4C3, dark: 0x8C8F92, solar: 0x9AA4B4, line: 0x5A5A58, soft: 0xB9B8B3, tree: 0xCDD6C4, treeLine: 0x8F998D,
-  route: 0xC0432C, coral: 0xE8735A, accent: 0xD9897D, gold: 0xE2B54A, ruin: 0xE2DFD8,
+  route: 0x5E9C34, red: 0xC0432C, teal: 0x1E9E96, sel: 0x2E2E2C, coral: 0xE8735A, accent: 0xD9897D, gold: 0xE2B54A, ruin: 0xE2DFD8,
   tint: { civic: 0xEFE7D6, data: 0xDFE8EB, services: 0xE8E2EE, pages: 0xF1E3E8, other: 0xE9E7E1 },
 };
 // language: a coloured band at the roofline; hues spread so neighbours read apart
@@ -1960,7 +2002,7 @@ function kit3(col, ox, oy, oz, scale = 1) {
   const base = new THREE.Matrix4().makeTranslation(ox, oz, oy).multiply(new THREE.Matrix4().makeScale(scale, scale, scale));
   const tmpQ = new THREE.Quaternion(), ONE = new THREE.Vector3(1, 1, 1);
   const M = (x, y, z, rx = 0, ry = 0, rz = 0) => base.clone().multiply(new THREE.Matrix4().compose(new THREE.Vector3(x, z, y), tmpQ.setFromEuler(new THREE.Euler(rx, ry, rz)), ONE));
-  const edgeHex = (e) => (e === 'soft' ? AX.soft : e === 'tree' ? AX.treeLine : e === 'red' ? AX.route : AX.line);
+  const edgeHex = (e) => (e === 'soft' ? AX.soft : e === 'tree' ? AX.treeLine : e === 'red' ? AX.red : AX.line);
   const put = (geo, m, color, edge, angle) => { if (edge) col.edges(geo, m, edgeHex(edge), angle); col.mesh(geo, m, color); geo.dispose(); };
   const V = (x, y, z) => new THREE.Vector3(x, z, y).applyMatrix4(base);
   const K = {
@@ -2018,7 +2060,7 @@ const PIECES3D = {
     const x = -w / 2, y = -d / 2, w1 = w * 0.58;
     volume(K, x, y, w1, d * 0.9, h * 0.62, b); volume(K, x + w1, y, w - w1, d * 0.9, h, b, { glass: true });
     for (let i = 0; i < 3; i++) K.box(x + w * 0.15 + i * 0.04, y + d * 0.9 + i * 0.03, 0, w * 0.5 - i * 0.08, 0.04, 0.05 * (3 - i), AX.roof, 'soft');
-    K.line([[x - 0.05, y + d - 0.02, 0], [x - 0.05, y + d - 0.02, h * 1.1]], 'ink'); K.box(x - 0.04, y + d - 0.03, h * 0.92, 0.3, 0.01, 0.17, AX.route, null);
+    K.line([[x - 0.05, y + d - 0.02, 0], [x - 0.05, y + d - 0.02, h * 1.1]], 'ink'); K.box(x - 0.04, y + d - 0.03, h * 0.92, 0.3, 0.01, 0.17, AX.red, null);
   },
   library(K, b, w, d, h) {
     const x = -w / 2, y = -d / 2, hg = Math.max(0.3, h * 0.33);
@@ -2029,7 +2071,7 @@ const PIECES3D = {
   reading(K, b, w, d, h) { const x = -w / 2, y = -d / 2, H = Math.max(0.55, Math.min(h, 0.8)); K.box(x + w * 0.15, y + d * 0.15, 0, w * 0.7, d * 0.7, H * 0.85, AX.glass); for (const [u, v] of [[0.04, 0.04], [0.96, 0.04], [0.96, 0.96], [0.04, 0.96]]) K.line([[x + w * u, y + d * v, 0], [x + w * u, y + d * v, H]], 'ink'); K.box(x, y, H, w, d, 0.06, wallOf(b)); },
   plaque(K, b, w, d) { const s = Math.max(w, d); K.box(-s * 0.4, -0.06, 0, s * 0.8, 0.12, s * 0.75, AX.roof); },
   fence(K, b, w, d) { const p = [], y = d * 0.3, n = 5; for (let i = 0; i <= n; i++) p.push([-w / 2 + i * w / n, y, 0], [-w / 2 + i * w / n, y, 0.5]); p.push([-w / 2, y, 0.5], [w / 2, y, 0.5], [-w / 2, y, 0.25], [w / 2, y, 0.25]); K.line(p, 'ink'); },
-  customs(K, b, w, d) { const x = -w / 2, y = -d / 2; K.box(x, y, 0, w * 0.32, d * 0.45, 0.55, wallOf(b)); K.box(x - 0.05, y - 0.05, 0.68, w * 0.75, d * 0.8, 0.05, AX.roof); K.line([[x + w * 0.66, y + d * 0.68, 0], [x + w * 0.66, y + d * 0.68, 0.68], [x, y + d * 0.68, 0], [x, y + d * 0.68, 0.68]], 'ink'); K.box(x + w * 0.35, y + d * 0.78, 0.3, w * 0.6, 0.04, 0.04, AX.route, null); K.container(x + w * 0.7, y, 0, CONT[1], w * 0.28, d * 0.25, 0.22); K.container(x + w * 0.7, y, 0.22, CONT[0], w * 0.28, d * 0.25, 0.22); },
+  customs(K, b, w, d) { const x = -w / 2, y = -d / 2; K.box(x, y, 0, w * 0.32, d * 0.45, 0.55, wallOf(b)); K.box(x - 0.05, y - 0.05, 0.68, w * 0.75, d * 0.8, 0.05, AX.roof); K.line([[x + w * 0.66, y + d * 0.68, 0], [x + w * 0.66, y + d * 0.68, 0.68], [x, y + d * 0.68, 0], [x, y + d * 0.68, 0.68]], 'ink'); K.box(x + w * 0.35, y + d * 0.78, 0.3, w * 0.6, 0.04, 0.04, AX.red, null); K.container(x + w * 0.7, y, 0, CONT[1], w * 0.28, d * 0.25, 0.22); K.container(x + w * 0.7, y, 0.22, CONT[0], w * 0.28, d * 0.25, 0.22); },
   warehouse(K, b, w, d, h) { const x = -w / 2, y = -d / 2, H = Math.max(0.5, Math.min(h * 0.55, 0.9)); K.box(x, y, 0, w, d, H, wallOf(b)); const n = Math.max(2, Math.floor(w / 0.38)); for (let i = 0; i < n; i++) K.box(x + 0.08 + i * (w - 0.1) / n, y + d, 0, (w - 0.1) / n * 0.7, 0.012, H * 0.55, AX.glassDark, 'soft'); for (let i = 0; i < Math.min(4, n); i++) K.box(x + 0.15 + i * w * 0.22, y + d * 0.3, H, 0.16, 0.16, 0.1, AX.steel, 'soft'); },
   port(K, b, w, d) { const x = -w / 2, y = -d / 2, cw = w * 0.28, cd = d * 0.22, ch = 0.22; [[0, 0, 0], [0, 0, ch], [cw * 1.05, 0, 0], [0, cd * 1.15, 0], [cw * 1.05, cd * 1.15, 0]].forEach(([u, v, z], i) => K.container(x + 0.05 + u, y + 0.08 + v, z, CONT[i], cw, cd, ch)); const gx = x + w * 0.66, H = 1.3; for (const yy of [y + 0.05, y + d - 0.1]) for (const xx of [gx, x + w - 0.08]) K.box(xx, yy, 0, 0.05, 0.05, H, AX.steel, 'soft'); K.box(gx, y + 0.05, H, x + w - gx, d - 0.1, 0.05, AX.steel, 'soft'); K.box(x + 0.1, y + d * 0.45, H, w * 0.7, 0.05, 0.05, AX.steel, 'soft'); },
   works(K, b, w, d, h) { const x = -w / 2, y = -d / 2, H = Math.max(0.5, Math.min(h * 0.5, 0.8)); K.box(x, y, 0, w, d, H, wallOf(b)); const n = Math.max(2, Math.floor(w / 0.45)); for (let i = 0; i < n; i++) K.box(x + 0.05 + i * (w - 0.05) / n, y + 0.08, H + 0.02, (w - 0.05) / n * 0.85, d - 0.16, 0.03, AX.solar, 'soft', [-0.12, 0, 0]); K.box(x + w * 0.2, y + d, 0.08, w * 0.6, 0.012, H * 0.45, AX.glassDark, 'soft'); },
@@ -2049,7 +2091,7 @@ const PIECES3D = {
   water(K, b, w, d, h) { const H = Math.max(1.2, Math.min(2, h)); K.cyl(0, 0, 0, 0.09, H, wallOf(b), 10); K.sphere(0, 0, H + 0.3, Math.min(0.5, Math.min(w, d) * 0.45), wallOf(b), 0.72); },
   dyeworks(K, b, w, d, h) { const x = -w / 2, y = -d / 2, H = Math.max(0.8, Math.min(h, 1.3)); K.box(x, y, 0, w, d, H, wallOf(b)); const cols = [0xE7B8A8, 0xE9D9A0, 0xB9CCC8, 0xBCC8DD, 0xD8C3DD]; const nx = 5, nz = 3; for (let i = 0; i < nx; i++) for (let j = 0; j < nz; j++) K.box(x + w * (0.04 + i * 0.19), y + d, 0.08 + j * H * 0.3, w * 0.16, 0.012, H * 0.25, cols[(i + j) % 5], 'soft'); },
   gate(K, b, w, d) { const x = -w / 2, y = -d / 2; K.box(x, y + d * 0.35, 0.01, w, d * 0.3, 0.01, AX.road, null); K.line([[x, y + d * 0.42, 0.025], [x + w, y + d * 0.42, 0.025], [x, y + d * 0.58, 0.025], [x + w, y + d * 0.58, 0.025]], 'ink'); K.box(x + w * 0.15, y + d * 0.7, 0, w * 0.7, d * 0.2, 0.12, AX.roof, 'soft'); for (const u of [0.2, 0.5, 0.8]) K.line([[x + w * u, y + d * 0.8, 0.12], [x + w * u, y + d * 0.8, 0.7]], 'ink'); K.box(x + w * 0.1, y + d * 0.3, 0.7, w * 0.8, d * 0.6, 0.04, AX.glass); },
-  clearing(K, b, w, d) { K.box(-0.5, -0.32, 0, 1.0, 0.64, 0.45, AX.wall); K.box(-0.11, -0.11, 0, 0.22, 0.22, 1.15, AX.wall); K.box(-0.11, 0.11, 0.8, 0.22, 0.01, 0.25, AX.route, null); },
+  clearing(K, b, w, d) { K.box(-0.5, -0.32, 0, 1.0, 0.64, 0.45, AX.wall); K.box(-0.11, -0.11, 0, 0.22, 0.22, 1.15, AX.wall); K.box(-0.11, 0.11, 0.8, 0.22, 0.01, 0.25, AX.red, null); },
   // landmarks: the file that leans hardest on a well-known library
   observatory(K, b, w, d, h) { const r = Math.min(w, d) * 0.42; K.box(-w / 2, -d / 2, 0, w, d, 0.45, wallOf(b)); K.sphere(0, 0, 0.45, r, AX.glass, 1, 'ink', true); },
   theater(K, b, w, d, h) { const x = -w / 2, y = -d / 2, H = Math.max(0.6, Math.min(h * 0.6, 1)); K.box(x, y, 0, w, d, H, wallOf(b)); K.box(x + w * 0.15, y + d, 0, w * 0.7, 0.012, H * 0.8, AX.glass, 'soft'); K.box(x - 0.06, y - 0.06, H + 0.02, w + 0.12, d + 0.12, 0.06, AX.accent, 'ink', [0, 0, 0.12]); K.band(x, y, w, d, H, bandOf(b.lang)); },
@@ -2059,7 +2101,7 @@ const PIECES3D = {
   lab(K, b, w, d, h) { const x = -w / 2, y = -d / 2, H = Math.max(0.7, Math.min(h, 1.2)); volume(K, x, y, w * 0.6, d, H, b); K.box(x + w * 0.6, y, 0, w * 0.4, d, H * 0.65, AX.glass); K.mullions(x + w * 0.6, y, w * 0.4, d, 0, H * 0.65, 0.15); K.sphere(x + w * 0.3, 0, H, Math.min(w, d) * 0.22, AX.pave, 1, 'soft', true); for (let i = 0; i < 3; i++) K.cyl(x + w * (0.68 + i * 0.1), y + d * 0.25, H * 0.65, 0.04, 0.35, AX.steel, 8, 'soft'); K.band(x, y, w * 0.6, d, H, bandOf(b.lang)); },
   oracle(K, b, w, d, h) { K.box(-w / 2, -d / 2, 0, w, d, 0.4, wallOf(b)); const H = Math.max(1.8, Math.min(2.8, h + 0.6)); K.cyl(0, 0, 0.4, 0.13, H - 0.4, wallOf(b), 14); K.ring(0, 0, H * 0.78, 0.3, 0.42, AX.gold); K.sphere(0, 0, H + 0.08, 0.11, AX.gold, 1, 'ink'); },
   mill(K, b, w, d) { for (const [u, v, H] of [[-0.25, -0.2, 1.9], [0.25, 0.2, 1.5]]) { const x = u * w, y = v * d; K.line([[x, y, 0], [x, y, H]], 'ink'); for (let i = 0; i < 3; i++) { const a = i * 2.094 + 0.4; K.line([[x, y + 0.02, H], [x + Math.cos(a) * 0.6 * H / 2, y + 0.02, H + Math.sin(a) * 0.6 * H / 2]], 'ink'); } K.sphere(x, y, H, 0.05, AX.wall, 1, null); } },
-  mast(K, b, w, d) { K.box(-w / 2, -d / 2, 0, w * 0.55, d * 0.7, 0.45, wallOf(b)); const tx = w * 0.25, top = [tx, 0, 2.2]; const p = []; for (const [u, v] of [[-0.15, -0.15], [0.15, -0.15], [0.15, 0.15], [-0.15, 0.15]]) p.push([tx + u, v, 0], top); for (const z of [0.6, 1.1, 1.6]) { const k = 0.15 * (2.2 - z) / 2.2; p.push([tx - k, 0, z], [tx + k, 0, z]); } K.line(p, 'ink'); K.sphere(tx, 0, 2.22, 0.06, AX.route, 1, null); },
+  mast(K, b, w, d) { K.box(-w / 2, -d / 2, 0, w * 0.55, d * 0.7, 0.45, wallOf(b)); const tx = w * 0.25, top = [tx, 0, 2.2]; const p = []; for (const [u, v] of [[-0.15, -0.15], [0.15, -0.15], [0.15, 0.15], [-0.15, 0.15]]) p.push([tx + u, v, 0], top); for (const z of [0.6, 1.1, 1.6]) { const k = 0.15 * (2.2 - z) / 2.2; p.push([tx - k, 0, z], [tx + k, 0, z]); } K.line(p, 'ink'); K.sphere(tx, 0, 2.22, 0.06, AX.red, 1, null); },
   automaton(K, b, w, d, h) { const x = -w / 2, y = -d / 2, H = Math.max(0.55, Math.min(h * 0.55, 0.8)); K.box(x, y, 0, w * 0.7, d, H, wallOf(b)); K.box(x + w * 0.72, -0.06, H * 0.5, 0.1, 0.1, 0.8, 0xE9A05C, 'ink', [0, 0, 0.3]); K.box(x + w * 0.62, -0.05, H * 0.5 + 0.7, 0.42, 0.08, 0.08, 0xE9A05C, 'ink', [0, 0, -0.2]); },
   studio(K, b, w, d, h) { const x = -w / 2, y = -d / 2, H = Math.max(0.8, Math.min(h, 1.2)); K.box(x, y, 0, w, d, H, 0x55504F); K.box(x + w * 0.35, y + d, 0, w * 0.35, 0.012, H * 0.7, AX.steel, 'soft'); K.box(x + w * 0.05, y + d, H * 0.82, w * 0.25, 0.012, H * 0.1, AX.accent, null); },
   assay(K, b, w, d) { const x = -w / 2, y = -d / 2; K.box(x, -0.2, 0.01, w, 0.4, 0.01, AX.road, null); for (const yy of [-0.32, 0.26]) K.box(-0.08, yy, 0, 0.16, 0.06, 0.85, wallOf(b), 'ink'); K.box(-0.1, -0.34, 0.85, 0.2, 0.68, 0.08, wallOf(b), 'ink'); K.box(x + w * 0.65, y + d * 0.68, 0, w * 0.3, d * 0.28, 0.5, wallOf(b)); },
@@ -2367,15 +2409,15 @@ class Town3D {
     if (this.pinned && this.pinned.type === 'building' && t.v >= 4 && this._wires) { ghost = true; const id = this.pinned.b.id; for (const w of this._wires) { if (w.lib) { if (w.a === id) { /* gate wire */ } continue; } if (w.a === id) lit.add(w.c); else if (w.c === id) lit.add(w.a); } }
     const dim = this.matches.length > 0 || ghost;
     this._city.material.opacity = dim ? 0.22 : 1; this._city.material.depthWrite = !dim; this._cityLines.material.opacity = dim ? 0.25 : 1;
-    for (const id of lit) { const B = this._bs[id]; if (!B) continue; const [m, l] = this._sliceOf(B, AX.route); if (dim) this.hot.add(m); this.hot.add(l);
+    for (const id of lit) { const B = this._bs[id]; if (!B) continue; const [m, l] = this._sliceOf(B, AX.sel); if (dim) this.hot.add(m); this.hot.add(l);
       const r = Math.max(0.6, Math.hypot(B.box.max.x - B.box.min.x, B.box.max.z - B.box.min.z) / 2 + 0.15); const pts = []; for (let a = 0; a <= 48; a++) pts.push(new THREE.Vector3(B.b.x + Math.cos(a / 48 * Math.PI * 2) * r, B.gz + 0.02, B.b.y + Math.sin(a / 48 * Math.PI * 2) * r)); this.hot.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: AX.route }))); }
     // imports of the selected building: ink arcs to what it uses, coral arcs from what uses it
     if (sel && sel.type === 'building' && t.v >= 4 && this._wires) {
-      // wires between the selected file and every file it touches glow: gold for what it uses, coral for what uses it
+      // wires between the selected file and every file it touches glow: gold for what it uses, teal for what uses it, red for outside libraries
       const id = sel.b.id, uses = new Set((t._out.get(id) || []).map((e) => e[0])), usedBy = new Set((t._in.get(id) || []).map((e) => e[0]));
       for (const w of this._wires) {
         if (w.a !== id && w.c !== id) continue; const other = w.a === id ? w.c : w.a;
-        const col = w.lib ? AX.route : uses.has(other) || !usedBy.has(other) ? 0xE2B54A : 0xE8735A;
+        const col = w.lib ? AX.red : uses.has(other) || !usedBy.has(other) ? AX.gold : AX.teal;
         const curve = new THREE.CatmullRomCurve3(w.pts.map((p) => new THREE.Vector3(p[0], p[2], p[1])));
         this.overlay.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 24, 0.13, 6, false), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.3, depthWrite: false })));
         this.overlay.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 24, 0.045, 6, false), new THREE.MeshBasicMaterial({ color: col })));
@@ -2384,7 +2426,7 @@ class Town3D {
       const b = sel.b, top = (id) => { const B = this._bs[id]; return B ? new THREE.Vector3(B.b.x, B.box.max.y, B.b.y) : null; };
       const arc = (a, c, hex) => { if (!a || !c) return; const m = a.clone().lerp(c, 0.5); m.y = Math.max(a.y, c.y) + a.distanceTo(c) * 0.25 + 0.4; this.overlay.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(new THREE.QuadraticBezierCurve3(a, m, c).getPoints(24)), new THREE.LineBasicMaterial({ color: hex }))); };
       for (const [id] of t._out.get(b.id) || []) arc(top(b.id), top(id), AX.line);
-      for (const [id] of t._in.get(b.id) || []) arc(top(id), top(b.id), AX.coral);
+      for (const [id] of t._in.get(b.id) || []) arc(top(id), top(b.id), AX.teal);
     }
     if (this.showRoute) this._routeOverlay();
     this._routeStops = this.showRoute ? (t.route || []).map((st, i) => ({ i, b: t.buildings[st.id] })) : [];
@@ -2583,7 +2625,7 @@ function buildLegend(town, use3d) {
     trail: () => ground((g) => { g.strokeStyle = '#8A8A86'; g.setLineDash([4, 4]); g.lineWidth = 1.5; g.beginPath(); g.moveTo(6, 17); g.lineTo(W - 6, 17); g.stroke(); }),
     block: () => ground((g) => { g.fillStyle = '#F7F6F2'; g.strokeStyle = '#C9C7C0'; g.fillRect(8, 6, W - 16, H - 12); g.strokeRect(8, 6, W - 16, H - 12); g.fillStyle = '#EFE7D6'; g.fillRect(11, 9, W - 22, H - 18); }),
     terminal: () => pic({ landmark: null, kind: 'clearing', lang: null }),
-    route: () => ground((g) => { g.fillStyle = '#BDB9B1'; g.fillRect(4, 13, W - 8, 9); g.strokeStyle = '#C0432C'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(6, 17.5); g.lineTo(W - 6, 17.5); g.stroke(); g.fillStyle = '#C0432C'; g.beginPath(); g.arc(W / 2, 8, 6, 0, 7); g.fill(); g.fillStyle = '#fff'; g.font = '700 8px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('1', W / 2, 8.5); }),
+    route: () => ground((g) => { g.fillStyle = '#BDB9B1'; g.fillRect(4, 13, W - 8, 9); g.strokeStyle = '#5E9C34'; g.lineWidth = 2.5; g.beginPath(); g.moveTo(6, 17.5); g.lineTo(W - 6, 17.5); g.stroke(); g.fillStyle = '#C0432C'; g.beginPath(); g.arc(W / 2, 8, 6, 0, 7); g.fill(); g.fillStyle = '#fff'; g.font = '700 8px system-ui'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText('1', W / 2, 8.5); }),
     rings: () => ground((g) => { g.strokeStyle = '#B9B8B3'; for (const r of [6, 10, 14]) g.strokeRect(W / 2 - r * 1.4, H / 2 - r * 0.9, r * 2.8, r * 1.8); }),
     visitor: () => ground((g) => { g.fillStyle = '#E8735A'; for (const [x, y] of [[16, 20], [26, 14], [36, 22]]) { g.fillRect(x - 1.5, y - 2, 3, 6); g.beginPath(); g.arc(x, y - 4, 2, 0, 7); g.fill(); } }),
     crane: () => ground((g) => { g.strokeStyle = '#C0432C'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(30, 30); g.lineTo(30, 6); g.lineTo(12, 6); g.moveTo(16, 6); g.lineTo(16, 15); g.stroke(); }),
@@ -3602,7 +3644,7 @@ class HexWorld {
       + (info.doc ? `<p class="doc">${esc(info.doc)}</p>` : '')
       + (fns.length ? `<h5>What it does <small>functions</small></h5><div class="chips mono">${fns.map((f) => `<span>${esc(f)}</span>`).join('')}</div>` : '')
       + (uses && uses.length ? `<h5>Calls into <small>${t.v >= 4 ? 'gold wires' : 'ink lines'} on the map</small></h5><div class="chips">${names(uses)}</div>` : '')
-      + (usedBy && usedBy.length ? `<h5>Used by <small>${t.v >= 4 ? 'coral wires' : 'coral lines'} on the map</small></h5><div class="chips coral">${names(usedBy)}</div>` : '')
+      + (usedBy && usedBy.length ? `<h5>Used by <small>${t.v >= 4 ? 'teal wires' : 'teal lines'} on the map</small></h5><div class="chips coral">${names(usedBy)}</div>` : '')
       + (next ? `<p class="muted small">Next: ${esc(basename(t.buildings[next.id].path))}</p>` : '<p class="muted small">End of the route.</p>')
       + `<div class="tour-nav"><button class="ghost" data-tour="prev"${i ? '' : ' disabled'}>‹ Back</button><button class="ghost" data-tour="next"${next ? '' : ' disabled'}>Next ›</button><button class="ghost" data-tour="end">End</button></div>`;
   }
@@ -3622,7 +3664,7 @@ class HexWorld {
     if (L.kind === 'nation') {
       const o = state.owners[L.login]; const scanned = o.repos.filter((r) => state.towns[(o.login + '/' + r.name).toLowerCase()]).length;
       const ls = links.filter((l) => l.a === o.login || l.b === o.login);
-      h = `<h2><a href="https://github.com/${esc(o.login)}" target="_blank" rel="noopener">${esc(o.login)}</a></h2><p class="arch"><b>${o.type === 'Organization' ? 'Walled hub (organization)' : 'Hub (user)'}</b></p>
+      h = `<h2><a href="https://github.com/${esc(o.login)}" target="_blank" rel="noopener">${esc(o.login)}</a></h2><p class="arch"><b>${o.type === 'Organization' ? 'Organization' : 'Hub (user)'}</b></p>
         <dl class="stats"><div><dt>Plots</dt><dd>${o.repos.length}</dd></div><div><dt>Hoods built</dt><dd>${scanned}</dd></div><div><dt>Stars</dt><dd>${fmt(o.repos.reduce((a, r) => a + (r.stars || 0), 0))}</dd></div></dl>
         <h3>Plots</h3><ul class="list">${o.repos.slice().sort((a, b) => (a.id || 0) - (b.id || 0)).map((r, i) => `<li><button class="link" data-open="${esc(o.login)}/${esc(r.name)}">#${i + 1} ${esc(r.name)}</button><b>${state.towns[(o.login + '/' + r.name).toLowerCase()] ? 'town' : r.fork ? 'fork' : ''}</b></li>`).join('')}</ul>
         ${ls.length ? `<h3>Infrastructure</h3><ul class="list">${ls.map((l) => `<li><span>${esc(l.a === o.login ? l.b : l.a)}</span><b>${esc(l.why.join(', '))}</b></li>`).join('')}</ul>` : ''}`;
